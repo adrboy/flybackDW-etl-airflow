@@ -1,0 +1,105 @@
+from datetime import datetime
+from airflow.hooks.mysql_hook import MySqlHook
+from airflow.providers.microsoft.mssql.hooks.mssql import MsSqlHook
+
+def ejecutar_truncate_insert(
+    # Conexiones via Hook de Airflow
+    mariadb_conn_id,
+    mssql_conn_id,
+    # ETL
+    vista_origen, tabla_destino
+):
+    # Conexión a MariaDB via Hook
+    hook_origen = MySqlHook(mysql_conn_id=mariadb_conn_id)
+    conn_origen = hook_origen.get_conn()
+
+    # Conexión a SQL Server via Hook
+    hook_destino = MsSqlHook(mssql_conn_id=mssql_conn_id)
+    conn_destino = hook_destino.get_conn()
+
+    try:
+        cursor_origen = conn_origen.cursor()
+        cursor_destino = conn_destino.cursor()
+
+        # TRUNCATE tabla destino
+        cursor_destino.execute(f"TRUNCATE TABLE {tabla_destino}")
+        conn_destino.commit()
+
+        # SELECT origen y INSERT destino en batches
+        cursor_origen.execute(f"SELECT clientid, PHONE FROM {vista_origen}")
+        filas_insertadas = 0
+        batch_size = 1000
+        etl_fecha = datetime.now()
+
+        while True:
+            filas = cursor_origen.fetchmany(batch_size)
+            if not filas:
+                break
+            for fila in filas:
+                sql_insert = f"""
+                    INSERT INTO {tabla_destino} 
+                        (clientid, phone, atInsert, atUpdate)
+                    VALUES (%s, %s, %s, NULL)
+                """
+                cursor_destino.execute(sql_insert, fila + (etl_fecha,))
+            conn_destino.commit()
+            filas_insertadas += len(filas)
+        return filas_insertadas
+    finally:
+        conn_origen.close()
+        conn_destino.close()
+# import pymssql
+# from datetime import datetime
+# from airflow.hooks.mysql_hook import MySqlHook
+
+# def ejecutar_truncate_insert(
+#     # Conexión MariaDB desde Airflow
+#     mariadb_conn_id,
+#     # Destino SQL Server
+#     destino_servidor, destino_usuario, destino_password, destino_base,
+#     # ETL
+#     vista_origen, tabla_destino
+# ):
+#     # Conexión a MariaDB via Hook de Airflow
+#     hook = MySqlHook(mysql_conn_id=mariadb_conn_id)
+#     conn_origen = hook.get_conn()
+
+#     # Conexión a SQL Server
+#     conn_destino = pymssql.connect(
+#         server=destino_servidor,
+#         user=destino_usuario,
+#         password=destino_password,
+#         database=destino_base,
+#         port=1433
+#     )
+#     try:
+#         cursor_origen = conn_origen.cursor()
+#         cursor_destino = conn_destino.cursor()
+
+#         # TRUNCATE tabla destino
+#         cursor_destino.execute(f"TRUNCATE TABLE {tabla_destino}")
+#         conn_destino.commit()
+
+#         # SELECT origen y INSERT destino en batches
+#         cursor_origen.execute(f"SELECT clientid, PHONE FROM {vista_origen}")
+#         filas_insertadas = 0
+#         batch_size = 1000
+#         etl_fecha = datetime.now()
+
+#         while True:
+#             filas = cursor_origen.fetchmany(batch_size)
+#             if not filas:
+#                 break
+#             for fila in filas:                                  
+#                 sql_insert = f"""
+#                     INSERT INTO {tabla_destino} 
+#                         (clientid, phone, atInsert, atUpdate)
+#                     VALUES (%s, %s, %s, NULL)
+#                 """
+#                 cursor_destino.execute(sql_insert, fila + (etl_fecha,))
+#             conn_destino.commit()
+#             filas_insertadas += len(filas)
+#         return filas_insertadas
+#     finally:
+#         conn_origen.close()
+#         conn_destino.close()
