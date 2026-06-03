@@ -1,4 +1,3 @@
-version: '3.8'
 services:
   # Base de datos interna de Airflow (Backend)
   postgres:
@@ -19,7 +18,7 @@ services:
 
   # Interfaz web de Airflow
   airflow-webserver:
-    image: apache/airflow:2.7.1
+    image: apache/airflow:2.9.3
     container_name: airflow_webserver
     depends_on:
       postgres:
@@ -40,7 +39,7 @@ services:
 
   # El cerebro que ejecuta las tareas
   airflow-scheduler:
-    image: apache/airflow:2.7.1
+    image: apache/airflow:2.9.3
     container_name: airflow_scheduler
     depends_on:
       postgres:
