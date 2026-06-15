@@ -3,6 +3,7 @@
 # Objetivo: Actualizar tblInicioSolicitados, tblInicioAutorizados
 #           y tblInicioPagados en flybackDW
 # Carpeta: etl_flyback/
+# Versión: 1.1 — 2026-06-15
 # ═══════════════════════════════════════════════════════
 
 from airflow import DAG
