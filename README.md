@@ -1,132 +1,111 @@
-# 🔄 ETL Pipeline: SSIS → Apache Airflow
-> Migración de pipelines ETL desde Microsoft SSIS hacia Apache Airflow en Docker
-
-![Python](https://img.shields.io/badge/Python-3.12-blue)
-![Airflow](https://img.shields.io/badge/Airflow-2.9.3-green)
-![Docker](https://img.shields.io/badge/Docker-Compose-blue)
-![Status](https://img.shields.io/badge/Status-En%20Progreso-yellow)
+# 📚 Documentación del Proyecto ETL Bronze → Gold
+**Proyecto:** Migración ETL SSIS → Apache Airflow  
+**Autor:** Andrés  
+**Fecha inicio:** Mayo 2026  
+**Estado:** ✅ COMPLETADO
 
 ---
 
-## 📋 Descripción
+## 🎯 Resumen del Proyecto
 
-Pipeline ETL profesional que migra datos de clientes y teléfonos desde **MariaDB** (servidores 242 y 240) hacia **SQL Server** (servidor 244) con arquitectura de 3 capas:
-
-```
-Bronze Clients (incremental) → Bronze Phones (full refresh) → Gold (SPs SQL Server)
-```
+Migración exitosa de 11 pipelines ETL desde **Microsoft SSIS** hacia **Apache Airflow** (Docker), conectando **MariaDB 242/240** como origen y **SQL Server 244** como destino, con arquitectura de 3 capas (Bronze Clients → Bronze Phones → Gold).
 
 ---
 
-## 🏗️ Arquitectura
+## 🗂️ Estructura de Documentación
 
-```
-dag_masterclients   ← Bronze Clients (5 vistas, incremental por clientid)
-dag_masterphones    ← Bronze Phones (5 vistas, TRUNCATE+INSERT)
-dag_master_gold     ← Gold Layer (2 Stored Procedures SQL Server)
-```
-
----
-
-## 🛠️ Stack Tecnológico
-
-| Tecnología | Uso |
+| Carpeta | Contenido |
 |---|---|
-| Apache Airflow 2.9.3 | Orquestación de pipelines |
-| Docker / Docker Compose | Containerización |
-| Python 3.12 | Lógica ETL |
-| MariaDB | Base de datos origen |
-| SQL Server | Base de datos destino |
-| pymssql / MySqlHook | Conectores de base de datos |
+| `adr/` | Architecture Decision Records — decisiones técnicas |
+| `runbook/` | Guías operativas y solución de problemas |
+| `data_dictionary/` | Diccionario de datos de todas las capas |
+| `user_stories/` | Historias de usuario en metodología Scrum |
 
 ---
 
-## 🚀 Instalación
+## 🔗 Documentos Principales
 
-### Prerrequisitos
-- Docker Desktop instalado
-- Git instalado
-
-### Pasos
-
-```bash
-# 1. Clonar el repositorio
-git clone https://github.com/tu-usuario/flybackDW-etl-airflow.git
-cd flybackDW-etl-airflow
-
-# 2. Crear archivo de variables de entorno
-cp .env.example .env
-# Editar .env con tus credenciales
-
-# 3. Levantar los contenedores
-docker-compose up -d
-
-# 4. Abrir Airflow UI
-# http://localhost:8085
-# Usuario: airflow / Password: airflow
-```
-
-### Configurar conexiones en Airflow UI
-Ir a **Admin → Connections** y crear:
-
-| Conn Id | Tipo | Host | Puerto |
-|---|---|---|---|
-| `MariaDB` | MySQL | 192.168.10.242 | 3306 |
-| `MariaDB240` | MySQL | 192.168.10.240 | 3306 |
-| `MSSQL244` | Microsoft SQL Server | 192.168.10.244 | 1433 |
+- [ADR001 — Airflow vs SSIS](adr/ADR001_airflow_vs_ssis.md)
+- [Runbook ETL](runbook/etl_bronze_runbook.md)
+- [Diccionario de Datos](data_dictionary/bronze_layer.md)
+- [US001 — ETL Pipeline](user_stories/US001_bronze_layer.md)
 
 ---
 
-## 📁 Estructura del Proyecto
+## 📜 Arquitectura Inicial (As-Is) — Microsoft SSIS
+
+Antes de la migración, los pipelines ETL operaban en **Microsoft SSIS** para la globalización de clientes de todos los productos y empresas del grupo. Los paquetes consolidaban datos de múltiples servidores MariaDB hacia SQL Server para alimentar el Data Warehouse corporativo.
 
 ```
-DockersETL/
-├── .env.example          ← plantilla de variables de entorno
-├── .gitignore
-├── docker-compose.yml    ← configuración de contenedores
-├── docs/                 ← documentación completa
-│   ├── adr/              ← Architecture Decision Records
-│   ├── data_dictionary/  ← diccionario de datos
-│   ├── runbook/          ← guías operativas
-│   └── user_stories/     ← historias de usuario (Scrum)
-└── dags/
-    ├── common/           ← módulos reutilizables
-    │   ├── audit_logger.py
-    │   ├── db_connections.py
-    │   ├── email_notifier.py
-    │   ├── etl_base.py
-    │   └── etl_basephone.py
-    └── etl/              ← DAGs del pipeline
-        ├── dag_clients*  ← Bronze Clients
-        ├── dag_phones*   ← Bronze Phones
-        ├── dag_master*   ← Orquestadores
-        └── dag_master_gold.py
+pkgETL_MAESTRO_DW.dtsx  ← Orquestador principal
+    │
+    ├──► pkgClients42.dtsx   ← Clientes servidor 242
+    │         ├── Flyback MAX    → Insert Flyback
+    │         ├── BuyBack MAX    → Insert BuyBack
+    │         └── MasterLink MAX → Insert MasterLink
+    │
+    ├──► pkgClients40.dtsx   ← Clientes servidor 240
+    │         ├── Vacation C MAX → Insert Vacation C
+    │         └── Financiamiento MAX → Insert Financiamiento
+    │
+    └──► pkgPhone.dtsx       ← Teléfonos todos los productos
+              ├── Limpieza + Insert Phone FB
+              ├── Limpieza + Insert Phone BuyBack
+              ├── Limpieza + Insert Phone MasterLink
+              ├── Limpieza + Insert Phone Financiamiento
+              └── Limpieza + Insert Phone Vacation Center
 ```
+
+**Limitaciones identificadas:**
+- Sin reintentos automáticos ante fallos de conexión
+- Dependencia de licencias SQL Server Integration Services
+- Difícil monitoreo sin acceso al servidor Windows
+- No permitía ejecución individual de un pipeline fallido
 
 ---
 
-## 📚 Documentación
+## 🏗️ Arquitectura Final (To-Be) — Apache Airflow
 
-| Documento | Descripción |
+```
+DAG Master DW (futuro)
+    │
+    ├──► dag_masterclients   ← Bronze Clients (incremental)
+    │         ├── dag_clientsfi_240
+    │         ├── dag_clientsvc_240
+    │         ├── dag_clientsfb_242
+    │         ├── dag_clientsbb_242
+    │         └── dag_clientsml_242
+    │
+    ├──► dag_masterphones    ← Bronze Phones (TRUNCATE+INSERT)
+    │         ├── dag_phonefi_240
+    │         ├── dag_phonevc_240
+    │         ├── dag_phonefb_242
+    │         ├── dag_phonebb_242
+    │         └── dag_phoneml_242
+    │
+    └──► dag_master_gold     ← Gold Layer (SPs SQL Server)
+              ├── sp_etl_maestro
+              └── sp_insert_phones_factPersonalInfo
+```
+
+**Mejoras implementadas:**
+- ✅ Auditoría triple (Airflow + SQL Server + archivos .txt)
+- ✅ Reintentos automáticos (3 intentos, 1 minuto de pausa)
+- ✅ DAGs individuales ejecutables ante fallos parciales
+- ✅ Monitoreo desde UI web sin acceso al servidor
+- ✅ Código Python versionable en Git
+- ✅ Open Source — sin licencias adicionales
+
+---
+
+## 📊 Resultados Finales
+
+| Tabla Gold | Registros |
 |---|---|
-| [ADR001](docs/adr/ADR001_airflow_vs_ssis.md) | Por qué Airflow sobre SSIS |
-| [Runbook](docs/runbook/etl_bronze_runbook.md) | Operación y troubleshooting |
-| [Data Dictionary](docs/data_dictionary/bronze_layer.md) | Estructura de datos |
-| [User Story](docs/user_stories/US001_bronze_layer.md) | Requerimientos y criterios |
+| `gral.factClientes` | 283,523 |
+| `gral.factClientesDetalle` | 484,181 |
+| `gral.factPersonalInfo` | 452,665 |
 
 ---
 
-## 🔔 Notificaciones ETL
-
-El módulo `dags/common/email_notifier.py` envía notificaciones por correo al finalizar cada proceso ETL con el contenido del log adjunto.
-
----
-
-## 👤 Autor
-
-**Andrés** — Ingeniero de Datos  
-Proyecto en curso — Junio 2026
-
----
-
-*⚠️ Proyecto en desarrollo activo — Última actualización: 03/06/2026*
+*Última actualización: 28/05/2026*

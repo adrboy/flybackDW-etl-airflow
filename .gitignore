@@ -48,4 +48,4 @@ PG_VERSION
 
 # Backups
 docker-compose_bk*.yml
-dags/_duplicados_bk/
+dags/_duplicados_bk/clear
