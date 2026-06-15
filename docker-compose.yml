@@ -28,6 +28,8 @@ services:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__LOAD_EXAMPLES=False # Limpiamos la entropía, solo tus DAGs
       - _PIP_ADDITIONAL_REQUIREMENTS=polars connectorx sqlalchemy pymysql pyarrow apache-airflow-providers-mysql pyodbc apache-airflow-providers-odbc pymssql==2.2.11 apache-airflow-providers-microsoft-mssql
+      - EMAIL_USER=${EMAIL_USER}        # ← agregar
+      - EMAIL_PASSWORD=${EMAIL_PASSWORD} # ← agregar
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
@@ -48,6 +50,8 @@ services:
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - _PIP_ADDITIONAL_REQUIREMENTS=polars connectorx sqlalchemy pymysql pyarrow apache-airflow-providers-mysql pyodbc apache-airflow-providers-odbc pymssql==2.2.11 apache-airflow-providers-microsoft-mssql
+      - EMAIL_USER=${EMAIL_USER}        # ← agregar
+      - EMAIL_PASSWORD=${EMAIL_PASSWORD} # ← agregar
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs

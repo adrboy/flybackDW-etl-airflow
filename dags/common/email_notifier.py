@@ -5,6 +5,7 @@
 #           el contenido de un log ETL
 # Autor: Andrés — Gusacapital
 # Fecha: 2026-06-03
+# Update: 2026-06-15 — puerto 587 con autenticación
 # ══════════════════════════════════════════════
 
 import smtplib
@@ -15,11 +16,11 @@ from datetime               import datetime
 
 # ══════════════════════════════════════════════
 # Configuración del servidor de correo
-# Gusacapital — servidor propio sin TLS
+# Gusacapital — puerto 587, con autenticación, sin TLS/SSL
 # ══════════════════════════════════════════════
 
 SMTP_HOST     = "mail.gusacapital.com"
-SMTP_PORT     = 25
+SMTP_PORT     = 587                                          # ← corregido
 SMTP_USER     = os.getenv("EMAIL_USER",     "andres@gusacapital.com")
 SMTP_PASSWORD = os.getenv("EMAIL_PASSWORD", "")
 SMTP_FROM     = "andres@gusacapital.com"
@@ -89,11 +90,11 @@ Fecha    : {timestamp}
     msg["Subject"]  = subject
     msg.attach(MIMEText(body, "plain", "utf-8"))
 
-    # ── Enviar via SMTP ────────────────────────
+    # ── Enviar via SMTP puerto 587 con autenticación sin TLS ──
     try:
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
             server.ehlo()
-            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.login(SMTP_USER, SMTP_PASSWORD)          # ← autenticación
             server.sendmail(
                 SMTP_FROM
               , recipients
