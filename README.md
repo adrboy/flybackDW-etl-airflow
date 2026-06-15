@@ -1,8 +1,8 @@
 # 🔄 ETL Pipeline: SSIS → Apache Airflow
 > Migración de pipelines ETL desde Microsoft SSIS hacia Apache Airflow en Docker
 
-![Python](https://img.shields.io/badge/Python-3.8-blue)
-![Airflow](https://img.shields.io/badge/Airflow-2.7.1-green)
+![Python](https://img.shields.io/badge/Python-3.12-blue)
+![Airflow](https://img.shields.io/badge/Airflow-2.9.3-green)
 ![Docker](https://img.shields.io/badge/Docker-Compose-blue)
 ![Status](https://img.shields.io/badge/Status-En%20Progreso-yellow)
 
@@ -32,9 +32,9 @@ dag_master_gold     ← Gold Layer (2 Stored Procedures SQL Server)
 
 | Tecnología | Uso |
 |---|---|
-| Apache Airflow 2.7.1 | Orquestación de pipelines |
+| Apache Airflow 2.9.3 | Orquestación de pipelines |
 | Docker / Docker Compose | Containerización |
-| Python 3.8 | Lógica ETL |
+| Python 3.12 | Lógica ETL |
 | MariaDB | Base de datos origen |
 | SQL Server | Base de datos destino |
 | pymssql / MySqlHook | Conectores de base de datos |
@@ -93,6 +93,7 @@ DockersETL/
     ├── common/           ← módulos reutilizables
     │   ├── audit_logger.py
     │   ├── db_connections.py
+    │   ├── email_notifier.py
     │   ├── etl_base.py
     │   └── etl_basephone.py
     └── etl/              ← DAGs del pipeline
@@ -115,11 +116,17 @@ DockersETL/
 
 ---
 
-## 👤 Autor
+## 🔔 Notificaciones ETL
 
-**Andrés** — Ingeniero de Datos  
-Proyecto en curso — Mayo 2026
+El módulo `dags/common/email_notifier.py` envía notificaciones por correo al finalizar cada proceso ETL con el contenido del log adjunto.
 
 ---
 
-*⚠️ Proyecto en desarrollo activo*
+## 👤 Autor
+
+**Andrés** — Ingeniero de Datos  
+Proyecto en curso — Junio 2026
+
+---
+
+*⚠️ Proyecto en desarrollo activo — Última actualización: 03/06/2026*
