@@ -48,4 +48,6 @@ PG_VERSION
 
 # Backups
 docker-compose_bk*.yml
-dags/_duplicados_bk/clear
+dags/_duplicados_bk/
+__init__.py
+flybackDW-etl-airflow/
