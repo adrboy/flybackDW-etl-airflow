@@ -26,15 +26,17 @@ services:
     environment:
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False # Limpiamos la entropía, solo tus DAGs
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
       - _PIP_ADDITIONAL_REQUIREMENTS=polars connectorx sqlalchemy pymysql pyarrow apache-airflow-providers-mysql pyodbc apache-airflow-providers-odbc pymssql==2.2.11 apache-airflow-providers-microsoft-mssql
-      - EMAIL_USER=${EMAIL_USER}        # ← agregar
-      - EMAIL_PASSWORD=${EMAIL_PASSWORD} # ← agregar
+      - EMAIL_USER=${EMAIL_USER}
+      - EMAIL_PASSWORD=${EMAIL_PASSWORD}
+      - AIRFLOW__CORE__DEFAULT_TIMEZONE=America/Cancun  # ← UTC-5 México
+      - TZ=America/Cancun                               # ← UTC-5 México
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
-      - ./data_lake:/opt/airflow/data_lake # Capa Bronze/Parquet
+      - ./data_lake:/opt/airflow/data_lake
     ports:
       - "8085:8080"
     command: webserver
@@ -50,8 +52,10 @@ services:
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - _PIP_ADDITIONAL_REQUIREMENTS=polars connectorx sqlalchemy pymysql pyarrow apache-airflow-providers-mysql pyodbc apache-airflow-providers-odbc pymssql==2.2.11 apache-airflow-providers-microsoft-mssql
-      - EMAIL_USER=${EMAIL_USER}        # ← agregar
-      - EMAIL_PASSWORD=${EMAIL_PASSWORD} # ← agregar
+      - EMAIL_USER=${EMAIL_USER}
+      - EMAIL_PASSWORD=${EMAIL_PASSWORD}
+      - AIRFLOW__CORE__DEFAULT_TIMEZONE=America/Cancun  # ← UTC-5 México
+      - TZ=America/Cancun                               # ← UTC-5 México
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
