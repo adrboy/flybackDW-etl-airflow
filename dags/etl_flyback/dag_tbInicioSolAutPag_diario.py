@@ -3,7 +3,7 @@
 # Objetivo: Actualizar tblInicioSolicitados, tblInicioAutorizados
 #           y tblInicioPagados en flybackDW
 # Carpeta: etl_flyback/
-# Versión: 2.0 — 2026-06-15 (con log .txt y email)
+# Versión: 2.1 — 2026-06-16 (schedule lunes a viernes)
 # ═══════════════════════════════════════════════════════
 
 from airflow import DAG
@@ -36,7 +36,6 @@ def ejecutar_pagados():
 
 # ── Función log + email ───────────────────────────────────
 def generar_log_y_notificar():
-    ahora = datetime.now()
     mensaje = "\n".join([
         f"DAG: {DAG_ID} — INICIO",
         f"tblInicioSolicitados — OK",
@@ -55,7 +54,7 @@ def generar_log_y_notificar():
 with DAG(
     dag_id            = DAG_ID,
     description       = "Actualiza tblInicioSolicitados, tblInicioAutorizados y tblInicioPagados en flybackDW",
-    schedule_interval = "0 6 * * *",  # ← Diario a las 6am
+    schedule_interval = "0 6 * * 1-5",  # ← Lunes a Viernes a las 6am
     start_date        = datetime(2026, 6, 11),
     catchup           = False,
     tags              = ["flybackDW", "redeems", "mariadb"],
