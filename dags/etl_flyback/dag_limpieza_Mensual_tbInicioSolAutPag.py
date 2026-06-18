@@ -7,7 +7,7 @@
 # Versión: 1.0 — 2026-06-18
 # Schedule: Día 2 de cada mes a las 1:00am Cancún
 # ═══════════════════════════════════════════════════════
-
+import pendulum
 from airflow import DAG
 from airflow.operators.python  import PythonOperator
 from airflow.hooks.mysql_hook  import MySqlHook
@@ -50,7 +50,7 @@ with DAG(
     dag_id            = DAG_ID,
     description       = "Limpieza mensual de registros huérfanos en tablas Redeem DW",
     schedule_interval = "0 1 2 * *",  # ← Día 2 de cada mes a las 1:00am Cancún
-    start_date        = datetime(2026, 6, 18),
+    start_date        = pendulum.datetime(2026, 6, 18, tz="America/Cancun"),
     catchup           = False,
     timezone          = timezone("America/Cancun"),   # ← hora local Cancún
     tags              = ["flybackDW", "redeems", "mariadb", "limpieza"],
