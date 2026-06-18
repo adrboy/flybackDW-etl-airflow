@@ -54,7 +54,7 @@ def generar_log_y_notificar():
 with DAG(
     dag_id            = DAG_ID,
     description       = "Actualiza tblInicioSolicitados, tblInicioAutorizados y tblInicioPagados en flybackDW",
-    schedule_interval = "0 6 * * 1-5",  # ← Lunes a Viernes a las 6am
+    schedule_interval = "30 10 * * 1-5",  # ← Lunes a Viernes a las 5:30am Cancun (antes del dag_masterclients)
     start_date        = datetime(2026, 6, 11),
     catchup           = False,
     tags              = ["flybackDW", "redeems", "mariadb"],
