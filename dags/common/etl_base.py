@@ -1,19 +1,27 @@
-#import pymysql
-#import pymssql
-from datetime import datetime
-from airflow.hooks.mysql_hook import MySqlHook
-from airflow.providers.microsoft.mssql.hooks.mssql import MsSqlHook
+# ═══════════════════════════════════════════════════════
+# etl_base.py
+# Objetivo: Motor de ejecución ETL reutilizable
+# Carpeta: common/
+# Versión: 2.0 — 2026-06-19 (SQL externalizado + executemany)
+# ═══════════════════════════════════════════════════════
+# CAMBIOS v2.0:
+#   - SQL embebido eliminado → archivos .sql externos via sql_loader
+#   - INSERT fila por fila → executemany en lotes de 1000
+#   - Preparado para Databricks + Polars
+# ═══════════════════════════════════════════════════════
 
-# 242
-#SELECT MAX(clientid) from [DBGeneralDW].[source].[clientsfb]
-#SELECT MAX(clientid) from [DBGeneralDW].[source].[clientsbb]
-#SELECT ISNULL(MAX(clientid), 0) from [DBGeneralDW].[source].[clientsml]
+from datetime                                          import datetime
+from airflow.hooks.mysql_hook                          import MySqlHook
+from airflow.providers.microsoft.mssql.hooks.mssql    import MsSqlHook
+from common.sql_loader                                 import cargar_sql
 
-# 240
-#SELECT MAX(clientid) from [DBGeneralDW].[source].[clientsfi]
-#SELECT MAX(clientid) from [DBGeneralDW].[source].[clientsvc]
+BATCH_SIZE = 1000  # ← lotes de 1000 filas — patrón batch/Databricks
 
-def get_max_id(mssql_conn_id, tabla_destino):
+def get_max_id(mssql_conn_id: str, tabla_destino: str) -> int:
+    """
+    Obtiene el MAX(clientid) del destino SQL Server.
+    Retorna 0 si la tabla está vacía.
+    """
     hook = MsSqlHook(mssql_conn_id=mssql_conn_id)
     conn = hook.get_conn()
     try:
@@ -24,207 +32,76 @@ def get_max_id(mssql_conn_id, tabla_destino):
     finally:
         conn.close()
 
-def ejecutar_insert(
-    # Conexiones via Hook de Airflow
-    mariadb_conn_id,
-    mssql_conn_id,
-    # ETL
-    vista_origen, tabla_destino, max_id
-):
-    # Conexión a MariaDB via Hook
-    hook_origen = MySqlHook(mysql_conn_id=mariadb_conn_id)
-    conn_origen = hook_origen.get_conn()
 
-    # Conexión a SQL Server via Hook
+def ejecutar_insert(
+    mariadb_conn_id : str,
+    mssql_conn_id   : str,
+    sql_select      : str,   # ← ruta relativa al .sql de SELECT
+    sql_insert      : str,   # ← ruta relativa al .sql de INSERT
+    max_id          : int,
+    etl_fecha       : datetime = None,
+) -> int:
+    """
+    Ejecuta el ETL completo:
+      1. Lee el .sql de SELECT y lo ejecuta en MariaDB
+      2. Lee el .sql de INSERT y lo ejecuta en SQL Server
+      3. Inserta en lotes de 1000 filas con executemany
+
+    Args:
+        mariadb_conn_id : ID conexión Airflow → MariaDB origen
+        mssql_conn_id   : ID conexión Airflow → SQL Server destino
+        sql_select      : Ruta relativa al archivo SELECT .sql
+        sql_insert      : Ruta relativa al archivo INSERT .sql
+        max_id          : MAX(clientid) del destino para filtrar
+        etl_fecha       : Fecha de ejecución ETL (default: NOW)
+
+    Returns:
+        Total de filas insertadas
+    """
+    if etl_fecha is None:
+        etl_fecha = datetime.now()
+
+    # ── Cargar SQL externos ───────────────────────────────
+    query_select = cargar_sql(sql_select, max_id=max_id)
+    query_insert = cargar_sql(sql_insert)
+
+    # ── Conexiones ────────────────────────────────────────
+    hook_origen  = MySqlHook(mysql_conn_id=mariadb_conn_id)
     hook_destino = MsSqlHook(mssql_conn_id=mssql_conn_id)
+    conn_origen  = hook_origen.get_conn()
     conn_destino = hook_destino.get_conn()
 
     try:
-        cursor_origen = conn_origen.cursor()
+        cursor_origen  = conn_origen.cursor()
         cursor_destino = conn_destino.cursor()
 
-        cursor_origen.execute(f"""
-            SELECT productid, contractid, clientid, email, capdata,
-                   FirstName, LastName, countrycode, country, Estate,
-                   ciudad, address, zip, corpcode, corp,
-                   ingreso, egreso, rank, EstatusN, EstatusL
-            FROM {vista_origen} 
-            WHERE clientid > {max_id}
-        """)
+        # ── SELECT en MariaDB ─────────────────────────────
+        cursor_origen.execute(query_select)
         filas_insertadas = 0
-        batch_size = 1000
-        etl_fecha = datetime.now()
 
+        # ── INSERT en lotes de 1000 (executemany) ─────────
         while True:
-            filas = cursor_origen.fetchmany(batch_size)
+            filas = cursor_origen.fetchmany(BATCH_SIZE)
             if not filas:
                 break
-            for fila in filas:
-                sql_insert = f"""
-                    INSERT INTO {tabla_destino} (
-                        productid, contractid, clientid, email, capdata,
-                        FirstName, LastName, countrycode, country, Estate,
-                        ciudad, address, zip, corpcode, corp,
-                        ingreso, egreso, rank, EstatusN, EstatusL,
-                        createdAt, updatedAt, deletedAt
-                    ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, NULL, NULL
-                    )
-                """
-                cursor_destino.execute(sql_insert, fila + (etl_fecha,))
+
+            # Agregar etl_fecha a cada fila → columna createdAt
+            lote = [fila + (etl_fecha,) for fila in filas]
+
+            # executemany → un solo roundtrip por lote de 1000
+            cursor_destino.executemany(query_insert, lote)
             conn_destino.commit()
-            filas_insertadas += len(filas)
+            filas_insertadas += len(lote)
+
         return filas_insertadas
+
     finally:
         conn_origen.close()
         conn_destino.close()
-# def get_max_id(servidor, usuario, password, base_datos, tabla_destino):
-#     conn = pymssql.connect(
-#         server=servidor,
-#         user=usuario,
-#         password=password,
-#         database=base_datos,
-#         port=1433
-#     )
-#     try:
-#         cursor = conn.cursor()
-#         cursor.execute(f"SELECT ISNULL(MAX(clientid), 0) FROM {tabla_destino}")
-#         resultado = cursor.fetchone()
-#         return resultado[0]
-#     finally:
-#         conn.close()
-
-# def ejecutar_insert(
-#     # Conexión MariaDB desde Airflow
-#     mariadb_conn_id,
-#     # Destino SQL Server
-#     destino_servidor, destino_usuario, destino_password, destino_base,
-#     # ETL
-#     vista_origen, tabla_destino, max_id
-# ):
-#     # Conexión a MariaDB via Hook de Airflow
-#     hook = MySqlHook(mysql_conn_id=mariadb_conn_id)
-#     conn_origen = hook.get_conn()
-
-#     # Conexión a SQL Server
-#     conn_destino = pymssql.connect(
-#         server=destino_servidor,
-#         user=destino_usuario,
-#         password=destino_password,
-#         database=destino_base,
-#         port=1433
-#     )
-#     try:
-#         cursor_origen = conn_origen.cursor()
-#         cursor_destino = conn_destino.cursor()
-
-#         # Ejecutar consulta en MariaDB
-#         #cursor_origen.execute(f"SELECT * FROM {vista_origen} WHERE clientid > {max_id}")
-#         cursor_origen.execute(f"""
-#             SELECT productid, contractid, clientid, email, capdata,
-#                    FirstName, LastName, countrycode, country, Estate,
-#                    ciudad, address, zip, corpcode, corp,
-#                    ingreso, egreso, rank, EstatusN, EstatusL
-#             FROM {vista_origen} 
-#             WHERE clientid > {max_id}
-#         """)
-#         filas_insertadas = 0
-#         batch_size = 1000
-#         etl_fecha = datetime.now()
-
-#         while True:
-#             filas = cursor_origen.fetchmany(batch_size)
-#             if not filas:
-#                 break
-#             for fila in filas:
-#                 placeholders = ", ".join(["%s"] * len(fila))                
-#                 #sql_insert = f"INSERT INTO {tabla_destino} VALUES ({placeholders})"
-#                 sql_insert = f"""
-#                     INSERT INTO {tabla_destino} (
-#                         productid, contractid, clientid, email, capdata,
-#                         FirstName, LastName, countrycode, country, Estate,
-#                         ciudad, address, zip, corpcode, corp,
-#                         ingreso, egreso, rank, EstatusN, EstatusL,
-#                         createdAt, updatedAt, deletedAt
-#                     ) VALUES (
-#                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-#                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-#                         %s, NULL, NULL
-#                     )
-#                 """
-#                 #cursor_destino.execute(sql_insert, fila)
-#                 cursor_destino.execute(sql_insert, fila + (etl_fecha,))
-#             conn_destino.commit()
-#             filas_insertadas += len(filas)
-#         return filas_insertadas
-#     finally:
-#         conn_origen.close()
-#         conn_destino.close()
 
 
-# def get_max_id(servidor, usuario, password, base_datos, tabla_destino):
-#     conn = pymssql.connect(
-#         server=servidor,
-#         user=usuario,
-#         password=password,
-#         database=base_datos,
-#         port=1433
-#     )
-#     try:
-#         cursor = conn.cursor()
-#         cursor.execute(f"SELECT ISNULL(MAX(clientid), 0) FROM {tabla_destino}")
-#         resultado = cursor.fetchone()
-#         return resultado[0]
-#     finally:
-#         conn.close()
-
-# def ejecutar_insert(
-#     # Origen MariaDB
-#     origen_host, origen_usuario, origen_password, origen_base,
-#     # Destino SQL Server
-#     destino_servidor, destino_usuario, destino_password, destino_base,
-#     # ETL
-#     vista_origen, tabla_destino, max_id
-# ):
-#     # Conexión a MariaDB
-#     conn_origen = pymysql.connect(
-#         host=origen_host,
-#         user=origen_usuario,
-#         password=origen_password,
-#         database=origen_base,
-#         charset='utf8mb4',
-#         port=3306
-#     )
-#     # Conexión a SQL Server
-#     conn_destino = pymssql.connect(
-#         server=destino_servidor,
-#         user=destino_usuario,
-#         password=destino_password,
-#         database=destino_base,
-#         port=1433
-#     )
-#     try:
-#         cursor_origen = conn_origen.cursor()
-#         cursor_destino = conn_destino.cursor()
-
-#         # Ejecutar consulta en MariaDB
-#         cursor_origen.execute(f"SELECT * FROM {vista_origen} WHERE clientid > {max_id}")
-#         filas_insertadas = 0
-#         batch_size = 1000
-
-#         while True:
-#             filas = cursor_origen.fetchmany(batch_size)
-#             if not filas:
-#                 break
-#             for fila in filas:
-#                 placeholders = ", ".join(["%s"] * len(fila))
-#                 sql_insert = f"INSERT INTO {tabla_destino} VALUES ({placeholders})"
-#                 cursor_destino.execute(sql_insert, fila)
-#             conn_destino.commit()
-#             filas_insertadas += len(filas)
-#         return filas_insertadas 
-#     finally:
-#         conn_origen.close()
-#         conn_destino.close()
+if __name__ == "__main__":
+    # ── Test de humo ─────────────────────────────────────
+    print("etl_base.py v2.0 — test de humo")
+    print(f"BATCH_SIZE: {BATCH_SIZE}")
+    print("Usa cargar_sql() para cargar los .sql externos")
