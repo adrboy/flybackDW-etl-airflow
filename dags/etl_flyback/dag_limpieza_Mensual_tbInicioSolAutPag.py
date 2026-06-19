@@ -4,7 +4,7 @@
 #           tblInicioSolicitados, tblInicioAutorizados
 #           y tblInicioPagados en flybackDW
 # Carpeta: etl_flyback/
-# Versión: 1.0 — 2026-06-18
+# Versión: 1.1 — 2026-06-19 (fix timezone → pendulum)
 # Schedule: Día 2 de cada mes a las 1:00am Cancún
 # ═══════════════════════════════════════════════════════
 import pendulum
@@ -12,7 +12,6 @@ from airflow import DAG
 from airflow.operators.python  import PythonOperator
 from airflow.hooks.mysql_hook  import MySqlHook
 from datetime                  import datetime
-from pendulum import timezone
 import sys
 sys.path.insert(0, '/opt/airflow/dags')
 from common.audit_logger   import escribir_log_txt
@@ -52,7 +51,6 @@ with DAG(
     schedule_interval = "0 1 2 * *",  # ← Día 2 de cada mes a las 1:00am Cancún
     start_date        = pendulum.datetime(2026, 6, 18, tz="America/Cancun"),
     catchup           = False,
-    timezone          = timezone("America/Cancun"),   # ← hora local Cancún
     tags              = ["flybackDW", "redeems", "mariadb", "limpieza"],
 ) as dag:
 

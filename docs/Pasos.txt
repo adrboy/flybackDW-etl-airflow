@@ -1,0 +1,6 @@
+1. Crear archivos .sql
+2. Verificar placeholders → python -c "print(sql.count('%s'))"
+3. Pausar el DAG → airflow dags pause
+4. Probar → airflow dags trigger
+5. Verificar logs
+6. Si todo OK → airflow dags unpause → producción

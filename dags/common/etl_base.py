@@ -2,18 +2,22 @@
 # etl_base.py
 # Objetivo: Motor de ejecución ETL reutilizable
 # Carpeta: common/
-# Versión: 2.0 — 2026-06-19 (SQL externalizado + executemany)
+# Versión: 2.2 — 2026-06-19 (dag_id + traceback + blindaje conexiones)
 # ═══════════════════════════════════════════════════════
-# CAMBIOS v2.0:
-#   - SQL embebido eliminado → archivos .sql externos via sql_loader
-#   - INSERT fila por fila → executemany en lotes de 1000
-#   - Preparado para Databricks + Polars
+# CAMBIOS v2.1:
+#   - NULL en SQL → None en Python para compatibilidad pymssql
+#   - updatedAt y deletedAt se pasan como None desde Python
 # ═══════════════════════════════════════════════════════
-
+# CAMBIOS v2.2:
+#   - dag_id como primer parámetro — identidad en logs
+#   - traceback.format_exc() — error exacto con línea culpable
+#   - try/except/finally — conexiones siempre se cierran
+import traceback
 from datetime                                          import datetime
 from airflow.hooks.mysql_hook                          import MySqlHook
 from airflow.providers.microsoft.mssql.hooks.mssql    import MsSqlHook
 from common.sql_loader                                 import cargar_sql
+from airflow.providers.mysql.hooks.mysql import MySqlHook  # ← nuevo
 
 BATCH_SIZE = 1000  # ← lotes de 1000 filas — patrón batch/Databricks
 
@@ -34,6 +38,7 @@ def get_max_id(mssql_conn_id: str, tabla_destino: str) -> int:
 
 
 def ejecutar_insert(
+    dag_id          : str,    # ← El nuevo protagonista
     mariadb_conn_id : str,
     mssql_conn_id   : str,
     sql_select      : str,   # ← ruta relativa al .sql de SELECT
@@ -60,6 +65,8 @@ def ejecutar_insert(
     """
     if etl_fecha is None:
         etl_fecha = datetime.now()
+    
+    print(f"[DAG: {dag_id}] — Iniciando ETL | max_id: {max_id}")
 
     # ── Cargar SQL externos ───────────────────────────────
     query_select = cargar_sql(sql_select, max_id=max_id)
@@ -85,8 +92,9 @@ def ejecutar_insert(
             if not filas:
                 break
 
-            # Agregar etl_fecha a cada fila → columna createdAt
-            lote = [fila + (etl_fecha,) for fila in filas]
+            # Agregar columnas de auditoría:
+            # createdAt = etl_fecha, updatedAt = None, deletedAt = None
+            lote = [fila + (etl_fecha, None, None) for fila in filas]
 
             # executemany → un solo roundtrip por lote de 1000
             cursor_destino.executemany(query_insert, lote)
@@ -94,14 +102,45 @@ def ejecutar_insert(
             filas_insertadas += len(lote)
 
         return filas_insertadas
+    
+    except Exception as e:
+        print(f"[DAG: {dag_id}] — ERROR: {traceback.format_exc()}")
+        raise  # ← re-lanza para que Airflow marque FAILED
 
     finally:
         conn_origen.close()
         conn_destino.close()
+        print(f"[DAG: {dag_id}] — Conexiones cerradas")
 
 
 if __name__ == "__main__":
-    # ── Test de humo ─────────────────────────────────────
-    print("etl_base.py v2.0 — test de humo")
-    print(f"BATCH_SIZE: {BATCH_SIZE}")
-    print("Usa cargar_sql() para cargar los .sql externos")
+    import sys
+    sys.path.insert(0, '/opt/airflow/dags')
+    
+    print("=" * 50)
+    print("TEST 1 — Simulando FALLO")
+    print("=" * 50)
+    try:
+        resultado = ejecutar_insert(
+            dag_id          = "TEST_LOCAL"
+          , mariadb_conn_id = "MariaDB"
+          , mssql_conn_id   = "MSSQL_244"
+          , sql_select      = "sql/clients/select_columna_mala.sql"  # ← no existe
+          , sql_insert      = "sql/clients/insert_clientsbb_242.sql"
+          , max_id          = 0
+        )
+    except Exception as e:
+        print(f"✅ Fallo capturado correctamente: {type(e).__name__}")
+
+    print("=" * 50)
+    print("TEST 2 — Simulando ÉXITO")
+    print("=" * 50)
+    resultado = ejecutar_insert(
+        dag_id          = "TEST_LOCAL"
+      , mariadb_conn_id = "MariaDB"
+      , mssql_conn_id   = "MSSQL_244"
+      , sql_select      = "sql/clients/select_clientsbb_242.sql"
+      , sql_insert      = "sql/clients/insert_clientsbb_242.sql"
+      , max_id          = 0
+    )
+    print(f"✅ Filas insertadas: {resultado}")

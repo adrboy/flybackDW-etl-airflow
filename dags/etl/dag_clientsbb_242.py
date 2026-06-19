@@ -40,7 +40,8 @@ def etl_clientsbb():
 
         # Paso 2 — ETL con SQL externo + executemany
         filas = ejecutar_insert(
-            mariadb_conn_id = ORIGEN_CONN_ID_242
+            dag_id          = "dag_clientsbb_242"
+          , mariadb_conn_id = ORIGEN_CONN_ID_242
           , mssql_conn_id   = MSSQL_CONN_ID
           , sql_select      = SQL_SELECT
           , sql_insert      = SQL_INSERT

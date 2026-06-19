@@ -1,12 +1,12 @@
 -- ═══════════════════════════════════════════════════════
--- INSERT: insert_clientsbb_242.sql
--- Destino: SQL Server — source.clientsbb
+-- INSERT: insert_clientsfi_240.sql
+-- Destino: SQL Server — source.clientsfi
 -- Nota: placeholders para executemany (pymssql)
 -- ═══════════════════════════════════════════════════════
-INSERT INTO source.clientsbb
+INSERT INTO source.clientsfi
        ( productid, contractid, clientid, email, capdata
        , FirstName, LastName, countrycode, country, Estate
-       , ciudad, address, zip, corpcode, corp
+       , Ciudad, address, zip, Corpcode, Corp
        , ingreso, egreso, rank, EstatusN, EstatusL
        , createdAt, updatedAt, deletedAt)
 VALUES ( %s, %s, %s, %s, %s
