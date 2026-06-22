@@ -1,134 +1,90 @@
+# ═══════════════════════════════════════════════════════
+# DAG: dag_clientsfb_242
+# Objetivo: ETL clientes FB desde MariaDB 242 → SQL Server
+# Carpeta: etl/
+# Versión: 2.0 — 2026-06-22 (SQL externalizado + executemany)
+# ═══════════════════════════════════════════════════════
+
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from datetime import datetime
+from datetime                  import datetime
 import sys
-import os
-
 sys.path.insert(0, '/opt/airflow/dags')
-from common.etl_base import get_max_id, ejecutar_insert
-from common.audit_logger import registrar_log, escribir_log_txt
+from common.etl_base      import get_max_id, ejecutar_insert
+from common.audit_logger  import registrar_log, escribir_log_txt
 from common.db_connections import (
-    ORIGEN_CONN_ID_242,
-    MSSQL_CONN_ID,
-    LOG_PATH
+    ORIGEN_CONN_ID_242
+  , MSSQL_CONN_ID
+  , LOG_PATH
 )
 
+# ── Configuración ────────────────────────────────────────
 VISTA_ORIGEN  = "db_general.viewclientsfb"
 TABLA_DESTINO = "source.clientsfb"
+SQL_SELECT    = "sql/clients/select_clientsfb_242.sql"
+SQL_INSERT    = "sql/clients/insert_clientsfb_242.sql"
 
+# ── Función ETL ──────────────────────────────────────────
 def etl_clientsfb():
-    fecha_inicio = datetime.now()
-    mensaje_log  = []
-    max_id = 0
-    filas  = 0
+    fecha_inicio  = datetime.now()
+    mensaje_log   = []
+    max_id        = 0
+    filas         = 0
+    estado        = "ERROR"
+    mensaje_error = None
 
     try:
-        # Paso 1 - Obtener MAX clientid del destino
-        max_id = get_max_id(
-            MSSQL_CONN_ID, TABLA_DESTINO
-        )
-        mensaje_log.append(f"MAX clientid destino: {max_id}")
+        # Paso 1 — MAX clientid del destino
+        max_id = get_max_id(MSSQL_CONN_ID, TABLA_DESTINO)
+        mensaje_log.append(f"[DAG: dag_clientsfb_242] MAX clientid destino: {max_id}")
 
-        # Paso 2 - Ejecutar insert
+        # Paso 2 — ETL con SQL externo + executemany
         filas = ejecutar_insert(
-            ORIGEN_CONN_ID_242,
-            MSSQL_CONN_ID,
-            VISTA_ORIGEN, TABLA_DESTINO, max_id
+            dag_id          = "dag_clientsfb_242"
+          , mariadb_conn_id = ORIGEN_CONN_ID_242
+          , mssql_conn_id   = MSSQL_CONN_ID
+          , sql_select      = SQL_SELECT
+          , sql_insert      = SQL_INSERT
+          , max_id          = max_id
         )
-        mensaje_log.append(f"Filas insertadas: {filas}")
+        mensaje_log.append(f"[DAG: dag_clientsfb_242] Filas insertadas: {filas}")
         estado = "SUCCESS"
-        mensaje_error = None
 
     except Exception as e:
-        mensaje_log.append(f"ERROR: {str(e)}")
-        estado = "ERROR"
+        mensaje_log.append(f"[DAG: dag_clientsfb_242] ERROR: {str(e)}")
         mensaje_error = str(e)
         raise
 
     finally:
-        # Log siempre se ejecuta — nunca reintenta
         try:
             registrar_log(
-                paquete="etl_clientsfb_242",
-                vista_origen=VISTA_ORIGEN,
-                tabla_destino=TABLA_DESTINO,
-                max_id_inicio=max_id,
-                filas_insertadas=filas,
-                tipo_ejecucion="SCHEDULED",
-                estado=estado,
-                mensaje_error=mensaje_error,
-                fecha_inicio=fecha_inicio,
-                fecha_fin=datetime.now()
+                paquete          = "etl_clientsfb_242"
+              , vista_origen     = VISTA_ORIGEN
+              , tabla_destino    = TABLA_DESTINO
+              , max_id_inicio    = max_id
+              , filas_insertadas = filas
+              , tipo_ejecucion   = "SCHEDULED"
+              , estado           = estado
+              , mensaje_error    = mensaje_error
+              , fecha_inicio     = fecha_inicio
+              , fecha_fin        = datetime.now()
             )
             escribir_log_txt(LOG_PATH, "clientsfb", "\n".join(mensaje_log))
         except Exception as log_error:
             print(f"WARNING: Log falló pero ETL fue exitoso: {str(log_error)}")
 
+# ── DAG ───────────────────────────────────────────────────
 with DAG(
-    dag_id="dag_clientsfb_242",
-    start_date=datetime(2026, 1, 1),
-    schedule_interval=None,
-    catchup=False,
-    tags=["bronze", "242", "clientsfb"]
+    dag_id            = "dag_clientsfb_242"
+  , start_date        = datetime(2026, 1, 1)
+  , schedule_interval = None
+  , catchup           = False
+  , tags              = ["bronze", "242", "clientsfb"]
 ) as dag:
+
     tarea_etl = PythonOperator(
-        task_id="etl_clientsfb",
-        python_callable=etl_clientsfb,
-        retries=3,
-        retry_delay=60
+        task_id         = "etl_clientsfb"
+      , python_callable = etl_clientsfb
+      , retries         = 3
+      , retry_delay     = 60
     )
-
-# def etl_clientsfb():
-#     fecha_inicio = datetime.now()
-#     mensaje_log  = []
-
-#     try:
-#         # Paso 1 - Obtener MAX clientid del destino
-#         max_id = get_max_id(
-#             DESTINO_SERVIDOR, DESTINO_USUARIO, DESTINO_PASSWORD,
-#             DESTINO_BASE, TABLA_DESTINO
-#         )
-#         mensaje_log.append(f"MAX clientid destino: {max_id}")
-#         # Paso 2 - Ejecutar insert
-#         # filas = ejecutar_insert(
-#         #     ORIGEN_HOST, ORIGEN_USUARIO, ORIGEN_PASSWORD, ORIGEN_BASE,
-#         #     DESTINO_SERVIDOR, DESTINO_USUARIO, DESTINO_PASSWORD, DESTINO_BASE,
-#         #     VISTA_ORIGEN, TABLA_DESTINO, max_id
-#         # )
-#         filas = ejecutar_insert(
-#             'MariaDB',
-#             DESTINO_SERVIDOR, DESTINO_USUARIO, DESTINO_PASSWORD, DESTINO_BASE,
-#             VISTA_ORIGEN, TABLA_DESTINO, max_id
-#         )
-#         mensaje_log.append(f"Filas insertadas: {filas}")
-#     except Exception as e:
-#         mensaje_log.append(f"ERROR: {str(e)}")
-#         registrar_log(
-#             paquete="etl_clientsfb_242",
-#             vista_origen=VISTA_ORIGEN,
-#             tabla_destino=TABLA_DESTINO,
-#             max_id_inicio=max_id if 'max_id' in locals() else 0,
-#             filas_insertadas=0,
-#             tipo_ejecucion="SCHEDULED",
-#             estado="ERROR",
-#             mensaje_error=str(e),
-#             fecha_inicio=fecha_inicio,
-#             fecha_fin=datetime.now()
-#         )
-#         escribir_log_txt(LOG_PATH, "clientsfb", "\n".join(mensaje_log))
-#         raise
-#     else:
-#         registrar_log(
-#             paquete="etl_clientsfb_242",
-#             vista_origen=VISTA_ORIGEN,
-#             tabla_destino=TABLA_DESTINO,
-#             max_id_inicio=max_id,
-#             filas_insertadas=filas,
-#             tipo_ejecucion="SCHEDULED",
-#             estado="SUCCESS",
-#             mensaje_error=None,
-#             fecha_inicio=fecha_inicio,
-#             fecha_fin=datetime.now()
-#         )
-#         escribir_log_txt(LOG_PATH, "clientsfb", "\n".join(mensaje_log))
-
