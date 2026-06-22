@@ -4,7 +4,7 @@
 **Autor:** Andrés — Gusacapital  
 **Fecha inicio:** Mayo 2026  
 **Última actualización:** 22/06/2026  
-**Estado:** 🔄 EN CURSO — Homologación v2 completada, phones pendiente
+**Estado:** ✅ Homologación v2 completada — clients y phones
 
 ---
 
@@ -49,11 +49,11 @@ dag_masterclients   ← Bronze Clients (INCREMENTAL — clientid > max_id)
     └── dag_clientsml_242   ✅ v2
 
 dag_masterphones    ← Bronze Phones (TRUNCATE + INSERT)
-    ├── dag_phonefi_240     ⏳ pendiente homologación
-    ├── dag_phonevc_240     ⏳ pendiente homologación
-    ├── dag_phonefb_242     ⏳ pendiente homologación
-    ├── dag_phonebb_242     ⏳ pendiente homologación
-    └── dag_phoneml_242     ⏳ pendiente homologación
+    ├── dag_phonefi_240     ✅ v2.1
+    ├── dag_phonevc_240     ✅ v2.1
+    ├── dag_phonefb_242     ✅ v2.1
+    ├── dag_phonebb_242     ✅ v2.1
+    └── dag_phoneml_242     ✅ v2.1
 
 dag_master_gold     ← Gold Layer (SPs SQL Server)
     ├── sp_etl_maestro
@@ -62,11 +62,11 @@ dag_master_gold     ← Gold Layer (SPs SQL Server)
 
 ---
 
-## Patrón v2 — Estándar de Oro
+## Patrón v2 — Clientes (INCREMENTAL)
 
-Todo DAG de clients sigue este patrón desde `dag_clientsbb_242.py` (sabado 19/06/2026).
+Todo DAG de clients sigue este patrón desde `dag_clientsbb_242.py` (19/06/2026).
 
-### Estructura de archivos por DAG
+### Estructura de archivos
 
 ```
 dags/
@@ -84,7 +84,7 @@ dags/
     └── sql_loader.py                ← Carga archivos .sql externos
 ```
 
-### Reglas del patrón
+### Reglas del patrón clients
 
 - **Cero SQL en Python** — todo SQL vive en archivos `.sql` externos
 - **`.bk` obligatorio** antes de modificar cualquier archivo
@@ -100,7 +100,7 @@ dags/
 get_max_id(mssql_conn_id, tabla_destino)
     → lee: sql/clients/get_max_id.sql
 
-# ejecutar_insert — motor batch
+# ejecutar_insert — motor batch incremental
 ejecutar_insert(
     dag_id          : str
   , mariadb_conn_id : str
@@ -112,7 +112,74 @@ ejecutar_insert(
 ) -> int  # filas insertadas
 ```
 
-### Conexiones Airflow
+---
+
+## Patrón v2.1 — Phones (TRUNCATE + INSERT)
+
+Todo DAG de phones sigue este patrón desde 22/06/2026.
+
+### Estructura de archivos
+
+```
+dags/
+├── etl/
+│   └── dag_phoneXX_XXX.py          ← DAG — solo orquestación
+├── sql/
+│   └── phones/
+│       ├── select_phone.sql         ← SELECT clientid, PHONE con {vista_origen}
+│       └── insert_phone.sql         ← INSERT con {tabla_destino} y %s
+└── common/
+    └── etl_basephone.py  v2.1       ← Motor TRUNCATE+INSERT
+```
+
+### Reglas del patrón phones
+
+- **TRUNCATE + INSERT** — tabla completa en cada ejecución
+- **Transacción única** — commit al final, rollback si falla en cualquier lote
+- **Un solo SQL select/insert compartido** — mismo archivo para los 5 productos
+- **`dag_id` como primer parámetro** — identidad en logs
+- **`BATCH_SIZE = 1000`** — lotes de 1000 filas con `executemany`
+- **`.bk` obligatorio** antes de modificar cualquier archivo
+
+### Firma de etl_basephone.py v2.1
+
+```python
+# ejecutar_truncate_insert — motor TRUNCATE+INSERT con rollback
+ejecutar_truncate_insert(
+    dag_id          : str
+  , mariadb_conn_id : str
+  , mssql_conn_id   : str
+  , vista_origen    : str   # db_general.vwpersonalinfo{xx}
+  , tabla_destino   : str   # source.Phone{xx}
+) -> int  # filas insertadas
+```
+
+### Flujo de transacción
+
+```
+TRUNCATE TABLE {tabla_destino}  → commit inmediato
+    ↓
+SELECT clientid, PHONE FROM {vista_origen}
+    ↓
+executemany lote 1..N           → SIN commit por lote
+    ↓
+COMMIT único al final           → todo insertado o nada
+    ↓ (si falla en cualquier lote)
+ROLLBACK                        → tabla queda intacta
+```
+
+### Benchmark — phonefb (473k registros)
+
+| Método | Duración |
+|---|---|
+| execute row-by-row v1 | 11 min 51 seg |
+| executemany pymssql v2 | 12 min 23 seg |
+
+**Nota:** Sin mejora con `executemany` porque `pymssql` lo emula internamente como inserts individuales. Pendiente migrar a `pyodbc` + `fast_executemany = True`.
+
+---
+
+## Conexiones Airflow
 
 | ID | Tipo | Servidor |
 |---|---|---|
@@ -122,7 +189,9 @@ ejecutar_insert(
 
 ---
 
-## Historial de versiones — etl_base.py
+## Historial de versiones
+
+### etl_base.py (clients)
 
 | Versión | Fecha | Cambio |
 |---|---|---|
@@ -130,11 +199,21 @@ ejecutar_insert(
 | v2.0 | May 2026 | Hooks de Airflow — sin credenciales en código |
 | v2.1 | Jun 2026 | NULL → None para compatibilidad pymssql |
 | v2.2 | 19/06/2026 | dag_id + traceback + blindaje conexiones finally |
-| v2.3 | 22/06/2026 | get_max_id → SQL externo, cero SQL embebido en Python |
+| v2.3 | 22/06/2026 | get_max_id → SQL externo, cero SQL embebido |
+
+### etl_basephone.py (phones)
+
+| Versión | Fecha | Cambio |
+|---|---|---|
+| v1.0 | May 2026 | Motor inicial — execute row-by-row, SQL embebido |
+| v2.0 | 22/06/2026 | executemany + SQL externo + dag_id + traceback |
+| v2.1 | 22/06/2026 | Rollback + commit único al final — todo o nada |
 
 ---
 
 ## Auditoría de sincronización — 22/06/2026
+
+### Clients
 
 | DAG | MAX origen | MAX destino | Registros insertados | Estado |
 |---|---|---|---|---|
@@ -144,15 +223,26 @@ ejecutar_insert(
 
 **Nota:** Se eliminaron 111 registros con clientid `999190748–999190858` de `source.clientsfb` — carga de prueba del 15/06/2026.
 
+### Phones
+
+| DAG | Origen | Destino | Estado |
+|---|---|---|---|
+| dag_phonefb_242 | 473,843 | 473,905 | ✅ |
+| dag_phonebb_242 | 11,340 | 11,340 | ✅ |
+| dag_phoneml_242 | 862 | 862 | ✅ |
+| dag_phonefi_240 | 94,597 | 94,604 | ✅ |
+| dag_phonevc_240 | 93,977 | 93,983 | ✅ |
+
 ---
 
 ## Pendientes
 
-- [ ] Homologar DAGs phones a v2 (`etl_basephone.py`)
+- [ ] Profiling `time.perf_counter()` en `etl_basephone.py` — mañana
+- [ ] Migrar `pymssql` → `pyodbc` + `fast_executemany` si profiling confirma cuello en INSERT
 - [ ] Investigar 5 huérfanos en `source.clientsfb` (clientid <= 372,993)
 - [ ] Investigar 3 huérfanos en `source.clientsml` (clientid <= 797)
 - [ ] Refactor batch — dag_factory + BatchResult (discutir con Gemini)
-- [ ] Tabla histórica de redeems desde 2013
+- [ ] UPSERT phones cuando origen tenga llave natural por teléfono
 
 ---
 
@@ -163,5 +253,6 @@ ejecutar_insert(
 - DAGs individuales ejecutables ante fallos parciales
 - Monitoreo desde UI web sin acceso al servidor
 - SQL externalizado — modificable sin tocar Python
+- Transacción única con rollback en phones — tabla nunca queda a medias
 - Versionable en Git con historial de `.bk`
 - Open Source — sin licencias adicionales
