@@ -2,7 +2,7 @@
 # etl_basephone.py
 # Objetivo: Motor TRUNCATE+INSERT reutilizable para phones
 # Carpeta: common/
-# Versión: 2.2 — 2026-06-22 (log detallado antes del rollback)
+# Versión: 2.3 — 2026-06-22 (TRUNCATE → SQL externo + rollback seguro)
 # ═══════════════════════════════════════════════════════
 # CAMBIOS v2.0:
 #   - execute row-by-row → executemany por lotes de 1000
@@ -18,6 +18,12 @@
 #   - Log detallado ANTES del rollback:
 #     lote donde falló, filas procesadas, traceback completo
 #     confirmación de rollback con nombre de tabla
+# CAMBIOS v2.3:
+#   - TRUNCATE → SQL externo sql/phones/truncate_phone.sql
+#   - Rollback seguro — verifica que conn_destino exista
+#     antes de hacer rollback (evita UnboundLocalError si
+#     falla antes de abrir conexión)
+#   - Cero SQL embebido en Python
 # ═══════════════════════════════════════════════════════
 # PENDIENTE v3.0:
 #   - Migrar a UPSERT cuando el origen tenga llave natural
@@ -29,9 +35,10 @@ from airflow.providers.mysql.hooks.mysql            import MySqlHook
 from airflow.providers.microsoft.mssql.hooks.mssql  import MsSqlHook
 from common.sql_loader                              import cargar_sql
 
-BATCH_SIZE   = 1000
-SQL_SELECT   = "sql/phones/select_phone.sql"
-SQL_INSERT   = "sql/phones/insert_phone.sql"
+BATCH_SIZE     = 1000
+SQL_SELECT     = "sql/phones/select_phone.sql"
+SQL_INSERT     = "sql/phones/insert_phone.sql"
+SQL_TRUNCATE   = "sql/phones/truncate_phone.sql"
 
 
 def ejecutar_truncate_insert(
@@ -43,8 +50,9 @@ def ejecutar_truncate_insert(
 ) -> int:
     """
     Ejecuta TRUNCATE + INSERT en lotes de 1000 filas con executemany.
-    Transacción única — commit al final, rollback si falla en cualquier lote.
+    Transacción única — commit al final, rollback seguro si falla.
     Log detallado antes del rollback para diagnóstico.
+    Cero SQL embebido en Python.
 
     Args:
         dag_id          : Identificador del DAG para logs
@@ -59,24 +67,28 @@ def ejecutar_truncate_insert(
     print(f"[DAG: {dag_id}] — Iniciando TRUNCATE+INSERT | destino: {tabla_destino}")
 
     # ── Cargar SQL externos ───────────────────────────────
-    query_select = cargar_sql(SQL_SELECT, vista_origen=vista_origen)
-    query_insert = cargar_sql(SQL_INSERT, tabla_destino=tabla_destino)
+    query_truncate = cargar_sql(SQL_TRUNCATE, tabla_destino=tabla_destino)
+    query_select   = cargar_sql(SQL_SELECT,   vista_origen=vista_origen)
+    query_insert   = cargar_sql(SQL_INSERT,   tabla_destino=tabla_destino)
 
     # ── Conexiones ────────────────────────────────────────
     hook_origen  = MySqlHook(mysql_conn_id=mariadb_conn_id)
     hook_destino = MsSqlHook(mssql_conn_id=mssql_conn_id)
-    conn_origen  = hook_origen.get_conn()
-    conn_destino = hook_destino.get_conn()
+    conn_origen  = None
+    conn_destino = None
 
     try:
+        conn_origen  = hook_origen.get_conn()
+        conn_destino = hook_destino.get_conn()
+
         cursor_origen  = conn_origen.cursor()
         cursor_destino = conn_destino.cursor()
         etl_fecha      = datetime.now()
 
         # ── TRUNCATE destino — commit inmediato ───────────
-        # El TRUNCATE no forma parte de la transacción principal
-        # Es intencional: libera el espacio antes de insertar
-        cursor_destino.execute(f"TRUNCATE TABLE {tabla_destino}")
+        # No forma parte de la transacción principal
+        # Es intencional: libera espacio antes de insertar
+        cursor_destino.execute(query_truncate)
         conn_destino.commit()
         print(f"[DAG: {dag_id}] — TRUNCATE {tabla_destino} OK")
 
@@ -108,12 +120,13 @@ def ejecutar_truncate_insert(
         print(f"[DAG: {dag_id}] — ERROR detectado en lote {filas_insertadas // BATCH_SIZE + 1}")
         print(f"[DAG: {dag_id}] — Filas procesadas antes del fallo: {filas_insertadas}")
         print(f"[DAG: {dag_id}] — {traceback.format_exc()}")
-        # ── ROLLBACK — tabla queda intacta ────────────────
-        conn_destino.rollback()
-        print(f"[DAG: {dag_id}] — ROLLBACK ejecutado — {tabla_destino} queda intacta")
+        # ── ROLLBACK seguro — solo si la conexión existe ──
+        if conn_destino is not None:
+            conn_destino.rollback()
+            print(f"[DAG: {dag_id}] — ROLLBACK ejecutado — {tabla_destino} queda intacta")
         raise  # ← re-lanza para que Airflow marque FAILED
 
     finally:
-        conn_origen.close()
-        conn_destino.close()
+        if conn_origen  is not None: conn_origen.close()
+        if conn_destino is not None: conn_destino.close()
         print(f"[DAG: {dag_id}] — Conexiones cerradas")

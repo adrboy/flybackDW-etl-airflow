@@ -4,7 +4,7 @@
 **Autor:** Andrés — Gusacapital  
 **Fecha inicio:** Mayo 2026  
 **Última actualización:** 22/06/2026  
-**Estado:** ✅ Homologación v2 completada — clients y phones
+**Estado:** ✅ Homologación v2 completada — clients, phones y gold
 
 ---
 
@@ -55,7 +55,7 @@ dag_masterphones    ← Bronze Phones (TRUNCATE + INSERT)
     ├── dag_phonebb_242     ✅ v2.1
     └── dag_phoneml_242     ✅ v2.1
 
-dag_master_gold     ← Gold Layer (SPs SQL Server)
+dag_master_gold     ← Gold Layer (SPs SQL Server) ✅ v2.2
     ├── sp_etl_maestro
     └── sp_insert_phones_factPersonalInfo
 ```
@@ -76,9 +76,11 @@ dags/
 │   └── clients/
 │       ├── get_max_id.sql           ← SELECT MAX(clientid) externo
 │       ├── select_clientsXX_XXX.sql ← SELECT origen con {max_id}
-│       └── insert_clientsXX_XXX.sql ← INSERT destino con %s
+│       ├── insert_clientsXX_XXX.sql ← INSERT destino con %s
+│       ├── exec_sp_maestro.sql      ← EXEC SP Gold Layer
+│       └── exec_sp_phones.sql       ← EXEC SP Gold Layer phones
 └── common/
-    ├── etl_base.py      v2.3        ← Motor ETL — cero SQL embebido
+    ├── etl_base.py      v2.4        ← Motor ETL — cero SQL embebido
     ├── audit_logger.py              ← Log a MariaDB + archivo .txt
     ├── db_connections.py            ← Connection IDs centralizados
     └── sql_loader.py                ← Carga archivos .sql externos
@@ -93,7 +95,7 @@ dags/
 - **`estado = "ERROR"` por defecto** — solo cambia a `"SUCCESS"` si completa
 - **`finally` siempre loguea** — Airflow nunca se queda sin auditoría
 
-### Firma de etl_base.py v2.3
+### Firma de etl_base.py v2.4
 
 ```python
 # get_max_id — SQL externo
@@ -127,24 +129,24 @@ dags/
 ├── sql/
 │   └── phones/
 │       ├── select_phone.sql         ← SELECT clientid, PHONE con {vista_origen}
-│       └── insert_phone.sql         ← INSERT con {tabla_destino} y %s
+│       ├── insert_phone.sql         ← INSERT con {tabla_destino} y %s
+│       └── truncate_phone.sql       ← TRUNCATE con {tabla_destino}
 └── common/
-    └── etl_basephone.py  v2.1       ← Motor TRUNCATE+INSERT
+    └── etl_basephone.py  v2.3       ← Motor TRUNCATE+INSERT
 ```
 
 ### Reglas del patrón phones
 
 - **TRUNCATE + INSERT** — tabla completa en cada ejecución
 - **Transacción única** — commit al final, rollback si falla en cualquier lote
-- **Un solo SQL select/insert compartido** — mismo archivo para los 5 productos
+- **Un solo SQL select/insert/truncate compartido** — mismo archivo para los 5 productos
 - **`dag_id` como primer parámetro** — identidad en logs
 - **`BATCH_SIZE = 1000`** — lotes de 1000 filas con `executemany`
 - **`.bk` obligatorio** antes de modificar cualquier archivo
 
-### Firma de etl_basephone.py v2.1
+### Firma de etl_basephone.py v2.3
 
 ```python
-# ejecutar_truncate_insert — motor TRUNCATE+INSERT con rollback
 ejecutar_truncate_insert(
     dag_id          : str
   , mariadb_conn_id : str
@@ -165,17 +167,50 @@ executemany lote 1..N           → SIN commit por lote
     ↓
 COMMIT único al final           → todo insertado o nada
     ↓ (si falla en cualquier lote)
+Log: lote fallido + filas procesadas + traceback
 ROLLBACK                        → tabla queda intacta
 ```
 
-### Benchmark — phonefb (473k registros)
+---
 
-| Método | Duración |
-|---|---|
-| execute row-by-row v1 | 11 min 51 seg |
-| executemany pymssql v2 | 12 min 23 seg |
+## Patrón v2.2 — Gold Layer (SQLExecuteQueryOperator)
 
-**Nota:** Sin mejora con `executemany` porque `pymssql` lo emula internamente como inserts individuales. Pendiente migrar a `pyodbc` + `fast_executemany = True`.
+### Regla crítica — template_searchpath obligatorio
+
+```python
+# SIEMPRE incluir en DAGs que usen SQLExecuteQueryOperator con .sql externos
+with DAG(
+    ...
+  , template_searchpath = "/opt/airflow/dags"  # ← Jinja2 busca desde aquí
+) as dag:
+    tarea = SQLExecuteQueryOperator(
+        sql = "sql/clients/exec_sp_maestro.sql"  # ← ruta relativa a dags/
+    )
+```
+
+**Sin `template_searchpath`** Jinja2 busca el template en la carpeta del DAG
+(`dags/etl/`) y lanza `TemplateNotFound`. El error es silencioso y confuso.
+
+**Por qué no SQL embebido:**
+```python
+# ❌ NUNCA — SQL embebido
+sql = "EXEC [dw_etl].[sp_etl_maestro]"
+
+# ✅ SIEMPRE — SQL externo
+sql = "sql/clients/exec_sp_maestro.sql"
+```
+
+### Estructura de archivos gold
+
+```
+dags/
+├── etl/
+│   └── dag_master_gold.py          ← DAG con template_searchpath
+└── sql/
+    └── clients/                    ← dominio clientes (bronze + gold)
+        ├── exec_sp_maestro.sql     ← EXEC sp_etl_maestro
+        └── exec_sp_phones.sql      ← EXEC sp_insert_phones_factPersonalInfo
+```
 
 ---
 
@@ -200,6 +235,7 @@ ROLLBACK                        → tabla queda intacta
 | v2.1 | Jun 2026 | NULL → None para compatibilidad pymssql |
 | v2.2 | 19/06/2026 | dag_id + traceback + blindaje conexiones finally |
 | v2.3 | 22/06/2026 | get_max_id → SQL externo, cero SQL embebido |
+| v2.4 | 22/06/2026 | Blindaje conexiones + log detallado en except |
 
 ### etl_basephone.py (phones)
 
@@ -207,7 +243,18 @@ ROLLBACK                        → tabla queda intacta
 |---|---|---|
 | v1.0 | May 2026 | Motor inicial — execute row-by-row, SQL embebido |
 | v2.0 | 22/06/2026 | executemany + SQL externo + dag_id + traceback |
-| v2.1 | 22/06/2026 | Rollback + commit único al final — todo o nada |
+| v2.1 | 22/06/2026 | Transacción única — commit al final, rollback si falla |
+| v2.2 | 22/06/2026 | Log detallado ANTES del rollback |
+| v2.3 | 22/06/2026 | TRUNCATE → SQL externo + rollback seguro con None check |
+
+### dag_master_gold.py
+
+| Versión | Fecha | Cambio |
+|---|---|---|
+| v1.0 | May 2026 | MsSqlOperator — SQL embebido |
+| v2.0 | 22/06/2026 | SQLExecuteQueryOperator + SQL externo |
+| v2.1 | 22/06/2026 | template_searchpath corregido |
+| v2.2 | 22/06/2026 | template_searchpath = "/opt/airflow/dags" — definitivo |
 
 ---
 
@@ -233,6 +280,12 @@ ROLLBACK                        → tabla queda intacta
 | dag_phonefi_240 | 94,597 | 94,604 | ✅ |
 | dag_phonevc_240 | 93,977 | 93,983 | ✅ |
 
+### Gold
+
+| DAG | Duración | Estado |
+|---|---|---|
+| dag_master_gold | 15 seg | ✅ |
+
 ---
 
 ## Pendientes
@@ -254,5 +307,6 @@ ROLLBACK                        → tabla queda intacta
 - Monitoreo desde UI web sin acceso al servidor
 - SQL externalizado — modificable sin tocar Python
 - Transacción única con rollback en phones — tabla nunca queda a medias
+- `template_searchpath` documentado — regla de oro para Gold Layer
 - Versionable en Git con historial de `.bk`
 - Open Source — sin licencias adicionales

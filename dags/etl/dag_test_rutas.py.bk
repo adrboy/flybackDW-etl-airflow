@@ -1,0 +1,50 @@
+# ═══════════════════════════════════════════════════════
+# test_rutas.py
+# Objetivo: Verificar que los archivos .sql son encontrados
+# Carpeta: etl/
+# ═══════════════════════════════════════════════════════
+
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from datetime                  import datetime
+import os
+
+DAGS_DIR = "/opt/airflow/dags"
+
+RUTAS = [
+    "sql/clients/exec_sp_maestro.sql"
+  , "sql/clients/exec_sp_phones.sql"
+  , "sql/clients/get_max_id.sql"
+  , "sql/clients/select_clientsbb_242.sql"
+  , "sql/phones/select_phone.sql"
+  , "sql/phones/insert_phone.sql"
+  , "sql/phones/truncate_phone.sql"
+]
+
+def verificar_rutas():
+    print(f"[TEST] DAGS_DIR = {DAGS_DIR}")
+    print(f"[TEST] Existe DAGS_DIR: {os.path.exists(DAGS_DIR)}")
+    print("-" * 60)
+    todos_ok = True
+    for ruta in RUTAS:
+        ruta_completa = os.path.join(DAGS_DIR, ruta)
+        existe        = os.path.exists(ruta_completa)
+        estado        = "✅ TRUE " if existe else "❌ FALSE"
+        print(f"[TEST] {estado} — {ruta}")
+        if not existe:
+            todos_ok = False
+    print("-" * 60)
+    print(f"[TEST] Resultado final: {'✅ TODAS OK' if todos_ok else '❌ HAY RUTAS FALTANTES'}")
+
+with DAG(
+    dag_id            = "dag_test_rutas"
+  , start_date        = datetime(2026, 1, 1)
+  , schedule_interval = None
+  , catchup           = False
+  , tags              = ["test"]
+) as dag:
+
+    tarea = PythonOperator(
+        task_id         = "verificar_rutas"
+      , python_callable = verificar_rutas
+    )
