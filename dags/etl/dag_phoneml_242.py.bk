@@ -1,0 +1,71 @@
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from datetime import datetime
+import sys
+import os
+
+sys.path.insert(0, '/opt/airflow/dags')
+from common.etl_basephone import ejecutar_truncate_insert
+from common.audit_logger import registrar_log, escribir_log_txt
+from common.db_connections import (
+    ORIGEN_CONN_ID_242,
+    MSSQL_CONN_ID,
+    LOG_PATH
+)
+
+VISTA_ORIGEN  = "db_general.vwpersonalinfoml"
+TABLA_DESTINO = "source.Phoneml"
+
+def etl_phoneml_242():
+    fecha_inicio = datetime.now()
+    mensaje_log  = []
+    filas = 0
+
+    try:
+        filas = ejecutar_truncate_insert(
+            ORIGEN_CONN_ID_242,
+            MSSQL_CONN_ID,
+            VISTA_ORIGEN, TABLA_DESTINO
+        )
+        mensaje_log.append(f"TRUNCATE + INSERT exitoso")
+        mensaje_log.append(f"Filas insertadas: {filas}")
+        estado = "SUCCESS"
+        mensaje_error = None
+
+    except Exception as e:
+        mensaje_log.append(f"ERROR: {str(e)}")
+        estado = "ERROR"
+        mensaje_error = str(e)
+        raise
+
+    finally:
+        try:
+            registrar_log(
+                paquete="dag_phoneml_242",
+                vista_origen=VISTA_ORIGEN,
+                tabla_destino=TABLA_DESTINO,
+                max_id_inicio=0,
+                filas_insertadas=filas,
+                tipo_ejecucion="SCHEDULED",
+                estado=estado,
+                mensaje_error=mensaje_error,
+                fecha_inicio=fecha_inicio,
+                fecha_fin=datetime.now()
+            )
+            escribir_log_txt(LOG_PATH, "phoneml", "\n".join(mensaje_log))
+        except Exception as log_error:
+            print(f"WARNING: Log falló pero ETL fue exitoso: {str(log_error)}")
+            
+with DAG(
+    dag_id="dag_phoneml_242",
+    start_date=datetime(2026, 1, 1),
+    schedule_interval=None,
+    catchup=False,
+    tags=["bronze", "242", "phoneml"]
+) as dag:
+    tarea_etl = PythonOperator(
+        task_id="etl_phoneml_242",
+        python_callable=etl_phoneml_242,
+        retries=3,
+        retry_delay=60
+    )
