@@ -1,50 +1,62 @@
-from datetime import datetime
-from airflow.hooks.mysql_hook import MySqlHook
-from airflow.providers.microsoft.mssql.hooks.mssql import MsSqlHook
+# ═══════════════════════════════════════════════════════
+# etl_basephone.py — BACKUP v2.3
+# ═══════════════════════════════════════════════════════
+import traceback
+from datetime                                       import datetime
+from airflow.providers.mysql.hooks.mysql            import MySqlHook
+from airflow.providers.microsoft.mssql.hooks.mssql  import MsSqlHook
+from common.sql_loader                              import cargar_sql
+
+BATCH_SIZE     = 1000
+SQL_SELECT     = "sql/phones/select_phone.sql"
+SQL_INSERT     = "sql/phones/insert_phone.sql"
+SQL_TRUNCATE   = "sql/phones/truncate_phone.sql"
 
 def ejecutar_truncate_insert(
-    # Conexiones via Hook de Airflow
-    mariadb_conn_id,
-    mssql_conn_id,
-    # ETL
-    vista_origen, tabla_destino
-):
-    # Conexión a MariaDB via Hook
-    hook_origen = MySqlHook(mysql_conn_id=mariadb_conn_id)
-    conn_origen = hook_origen.get_conn()
-
-    # Conexión a SQL Server via Hook
+    dag_id          : str
+  , mariadb_conn_id : str
+  , mssql_conn_id   : str
+  , vista_origen    : str
+  , tabla_destino   : str
+) -> int:
+    print(f"[DAG: {dag_id}] — Iniciando TRUNCATE+INSERT | destino: {tabla_destino}")
+    query_truncate = cargar_sql(SQL_TRUNCATE, tabla_destino=tabla_destino)
+    query_select   = cargar_sql(SQL_SELECT,   vista_origen=vista_origen)
+    query_insert   = cargar_sql(SQL_INSERT,   tabla_destino=tabla_destino)
+    hook_origen  = MySqlHook(mysql_conn_id=mariadb_conn_id)
     hook_destino = MsSqlHook(mssql_conn_id=mssql_conn_id)
-    conn_destino = hook_destino.get_conn()
-
+    conn_origen  = None
+    conn_destino = None
     try:
-        cursor_origen = conn_origen.cursor()
+        conn_origen  = hook_origen.get_conn()
+        conn_destino = hook_destino.get_conn()
+        cursor_origen  = conn_origen.cursor()
         cursor_destino = conn_destino.cursor()
-
-        # TRUNCATE tabla destino
-        cursor_destino.execute(f"TRUNCATE TABLE {tabla_destino}")
+        etl_fecha      = datetime.now()
+        cursor_destino.execute(query_truncate)
         conn_destino.commit()
-
-        # SELECT origen y INSERT destino en batches
-        cursor_origen.execute(f"SELECT clientid, PHONE FROM {vista_origen}")
+        print(f"[DAG: {dag_id}] — TRUNCATE {tabla_destino} OK")
+        cursor_origen.execute(query_select)
         filas_insertadas = 0
-        batch_size = 1000
-        etl_fecha = datetime.now()
-
         while True:
-            filas = cursor_origen.fetchmany(batch_size)
+            filas = cursor_origen.fetchmany(BATCH_SIZE)
             if not filas:
                 break
-            for fila in filas:
-                sql_insert = f"""
-                    INSERT INTO {tabla_destino} 
-                        (clientid, phone, atInsert, atUpdate)
-                    VALUES (%s, %s, %s, NULL)
-                """
-                cursor_destino.execute(sql_insert, fila + (etl_fecha,))
-            conn_destino.commit()
-            filas_insertadas += len(filas)
+            lote = [fila + (etl_fecha,) for fila in filas]
+            cursor_destino.executemany(query_insert, lote)
+            filas_insertadas += len(lote)
+        conn_destino.commit()
+        print(f"[DAG: {dag_id}] — COMMIT OK | Filas insertadas: {filas_insertadas}")
         return filas_insertadas
+    except Exception as e:
+        print(f"[DAG: {dag_id}] — ERROR detectado en lote {filas_insertadas // BATCH_SIZE + 1}")
+        print(f"[DAG: {dag_id}] — Filas procesadas antes del fallo: {filas_insertadas}")
+        print(f"[DAG: {dag_id}] — {traceback.format_exc()}")
+        if conn_destino is not None:
+            conn_destino.rollback()
+            print(f"[DAG: {dag_id}] — ROLLBACK ejecutado — {tabla_destino} queda intacta")
+        raise
     finally:
-        conn_origen.close()
-        conn_destino.close()
+        if conn_origen  is not None: conn_origen.close()
+        if conn_destino is not None: conn_destino.close()
+        print(f"[DAG: {dag_id}] — Conexiones cerradas")

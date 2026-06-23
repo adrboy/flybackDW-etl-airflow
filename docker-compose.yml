@@ -18,7 +18,8 @@ services:
 
   # Interfaz web de Airflow
   airflow-webserver:
-    image: apache/airflow:2.9.3
+    build: .                          # ← imagen custom con msodbcsql18
+    image: airflow-custom:2.9.3       # ← nombre de la imagen construida
     container_name: airflow_webserver
     depends_on:
       postgres:
@@ -27,11 +28,10 @@ services:
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
-      - _PIP_ADDITIONAL_REQUIREMENTS=polars connectorx sqlalchemy pymysql pyarrow apache-airflow-providers-mysql pyodbc apache-airflow-providers-odbc pymssql==2.2.11 apache-airflow-providers-microsoft-mssql
       - EMAIL_USER=${EMAIL_USER}
       - EMAIL_PASSWORD=${EMAIL_PASSWORD}
-      - AIRFLOW__CORE__DEFAULT_TIMEZONE=America/Cancun  # ← UTC-5 México
-      - TZ=America/Cancun                               # ← UTC-5 México
+      - AIRFLOW__CORE__DEFAULT_TIMEZONE=America/Cancun
+      - TZ=America/Cancun
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
@@ -43,7 +43,8 @@ services:
 
   # El cerebro que ejecuta las tareas
   airflow-scheduler:
-    image: apache/airflow:2.9.3
+    build: .                          # ← imagen custom con msodbcsql18
+    image: airflow-custom:2.9.3       # ← nombre de la imagen construida
     container_name: airflow_scheduler
     depends_on:
       postgres:
@@ -51,11 +52,10 @@ services:
     environment:
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - _PIP_ADDITIONAL_REQUIREMENTS=polars connectorx sqlalchemy pymysql pyarrow apache-airflow-providers-mysql pyodbc apache-airflow-providers-odbc pymssql==2.2.11 apache-airflow-providers-microsoft-mssql
       - EMAIL_USER=${EMAIL_USER}
       - EMAIL_PASSWORD=${EMAIL_PASSWORD}
-      - AIRFLOW__CORE__DEFAULT_TIMEZONE=America/Cancun  # ← UTC-5 México
-      - TZ=America/Cancun                               # ← UTC-5 México
+      - AIRFLOW__CORE__DEFAULT_TIMEZONE=America/Cancun
+      - TZ=America/Cancun
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
