@@ -1,0 +1,19 @@
+[
+  {
+    "task_id"    : "solicitados",
+    "descripcion": "Solicitudes de inicio FB — flybackDW",
+    "dag_id"     : "dag_tbInicioSolAutPag_diario",
+    "origen": {
+      "motor"   : "mariadb",
+      "database": "customers",
+      "tabla"   : "redeems",
+      "id_col"  : "indice"
+    },
+    "destino": {
+      "motor"   : "mariadb",
+      "database": "flybackDW",
+      "tabla"   : "tblInicioSolicitados",
+      "id_col"  : "contador"
+    }
+  }
+]
