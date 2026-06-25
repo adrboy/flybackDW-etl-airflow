@@ -16,6 +16,7 @@ sys.path.insert(0, '/opt/airflow/dags')
 from common.audit_logger   import escribir_log_txt
 from common.email_notifier import send_etl_notification
 from common.db_connections import LOG_PATH
+from common.sql_loader     import cargar_sql
 
 DAG_ID = "dag_tbInicioSolAutPag_diario"
 
@@ -58,17 +59,14 @@ def ejecutar_sp(tarea: dict):
         print(f"[{datetime.now()}] {tarea['tabla_destino']} — OK")
 
     except Exception as e:
-        hook.run(f"""
-            INSERT INTO flybackDW.etl_audit_log
-                   ( paquete, vista_origen, tabla_destino
-                   , tipo_ejecucion, estado, mensaje_error
-                   , fecha_inicio, fecha_fin)
-            VALUES ( '{tarea['sp']}'
-                   , '{tarea['vista_origen']}'
-                   , '{tarea['tabla_destino']}'
-                   , 'HORA', 'ERROR', '{str(e)[:500]}'
-                   , NOW(), NOW())
-        """)
+        sql_error = cargar_sql(
+            'sql/etl_flyback/insert_audit_log_error.sql'
+           ,sp            = tarea['sp']
+           ,vista_origen  = tarea['vista_origen']
+           ,tabla_destino = tarea['tabla_destino']
+           ,error         = str(e)[:500].replace("'", "")
+        )
+        hook.run(sql_error)
         raise
 
 
