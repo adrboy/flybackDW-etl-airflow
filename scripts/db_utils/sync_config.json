@@ -6,14 +6,54 @@
     "origen": {
       "motor"   : "mariadb",
       "database": "customers",
+      "sql_count": "SELECT COUNT(*), MAX(indice) FROM customers.redeems WHERE NOT ISNULL(fCorreo) AND IFNULL(status_r, 0) <> 0",
       "tabla"   : "redeems",
       "id_col"  : "indice"
     },
     "destino": {
       "motor"   : "mariadb",
       "database": "flybackDW",
+      "sql_count": "SELECT COUNT(*), MAX(contador) FROM flybackDW.tblInicioSolicitados",
       "tabla"   : "tblInicioSolicitados",
       "id_col"  : "contador"
+    }
+  },
+  {
+    "task_id"    : "autorizados",
+    "descripcion": "Autorizaciones de inicio FB — flybackDW",
+    "dag_id"     : "dag_tbInicioSolAutPag_diario",
+    "origen": {
+      "motor"   : "mariadb",
+      "database": "customers",
+      "sql_count": "SELECT COUNT(*), MAX(indice) FROM customers.pago_redeem WHERE NOT ISNULL(f_authorized)",
+      "tabla"   : "pago_redeem",
+      "id_col"  : "indice"
+    },
+    "destino": {
+      "motor"   : "mariadb",
+      "database": "flybackDW",
+      "sql_count": "SELECT COUNT(*), MAX(contador) FROM flybackDW.tblInicioAutorizados",
+      "tabla"   : "tblInicioAutorizados",
+      "id_col"  : "contador"
+    }
+  },
+  {
+    "task_id"    : "pagados",
+    "descripcion": "Pagos de inicio FB — flybackDW",
+    "dag_id"     : "dag_tbInicioSolAutPag_diario",
+    "origen": {
+      "motor"   : "mariadb",
+      "database": "customers",
+      "sql_count": "SELECT COUNT(*), MAX(A.indice) FROM customers.pago_redeem A INNER JOIN customers.redeems B ON B.pagoid = A.indice LEFT JOIN flybackDW.tblInicioPagados T ON T.pagoid = A.indice WHERE A.status_P >= 3 AND NOT ISNULL(IFNULL(A.f_excel, A.f_pago)) AND (T.pagoid IS NULL OR COALESCE(A.updateAt, '2000-01-01') > COALESCE(T.Update_At, '2000-01-01'))",
+      "tabla"   : "pago_redeem",
+      "id_col"  : "indice"
+    },
+    "destino": {
+      "motor"   : "mariadb",
+      "database": "flybackDW",
+      "sql_count": "SELECT COUNT(*), MAX(pagoid) FROM flybackDW.tblInicioPagados",
+      "tabla"   : "tblInicioPagados",
+      "id_col"  : "pagoid"
     }
   }
 ]
