@@ -91,6 +91,62 @@ cd "C:\Users\GUSA CAPITAL\Documents\DockersETL" && docker-compose restart airflo
 
 ---
 
+## 10. Auditoría del motor de sincronización
+
+```powershell
+# Verificar sincronización de tblInicioSolicitados, Autorizados y Pagados
+& "C:\Users\GUSA CAPITAL\anaconda3\python.exe" scripts/db_utils/audit_engine.py
+```
+> Script en: `scripts/db_utils/audit_engine.py` | Catálogo: `scripts/db_utils/sync_config.json`
+
+---
+
+## 11. Disparo manual de un DAG
+
+```powershell
+# Disparar cualquier DAG manualmente
+docker exec -it airflow_scheduler airflow dags trigger <dag_id>
+```
+
+---
+
+## 12. Ver estado de tareas de un run
+
+```powershell
+# Ver estado de cada tarea en un run específico
+docker exec -it airflow_scheduler airflow tasks states-for-dag-run <dag_id> "<run_id>"
+```
+
+---
+
+## 13. Limpieza completa de historial dag_run (PostgreSQL)
+
+```powershell
+# Conectarse al PostgreSQL de Airflow — puerto 5433
+# Host: localhost | User: airflow | Pass: airflow | DB: airflow
+
+# Auditar antes de borrar
+docker exec -it airflow_postgres_dedicated psql -U airflow -c "SELECT dag_id, state, COUNT(*) FROM dag_run GROUP BY dag_id, state ORDER BY dag_id, state;"
+
+# Pausar todos los DAGs antes de limpiar
+docker exec -it airflow_postgres_dedicated psql -U airflow -c "UPDATE dag SET is_paused = true WHERE is_paused = false;"
+
+# Borrar runs anteriores a hoy
+docker exec -it airflow_postgres_dedicated psql -U airflow -c "DELETE FROM dag_run WHERE DATE(queued_at) < CURRENT_DATE;"
+
+# Borrar absolutamente todo
+docker exec -it airflow_postgres_dedicated psql -U airflow -c "DELETE FROM dag_run;"
+
+# Reactivar DAGs de producción (excluir tests)
+docker exec -it airflow_postgres_dedicated psql -U airflow -c "UPDATE dag SET is_paused = false WHERE dag_id NOT IN ('0_certificacion_entorno', 'dag_test', 'test_conexion_mariadb', 'test_conexion_mssql244');"
+
+# Verificar count final
+docker exec -it airflow_postgres_dedicated psql -U airflow -c "SELECT COUNT(*) FROM dag_run;"
+```
+> ⚠️ Ver `CONVENTIONS.md` — orden correcto para limpiar sin disparar catchup
+
+---
+
 ## Notas
 
 | Tema | Detalle |
