@@ -2,9 +2,13 @@
 # archive_dag_run.ps1
 # Archiva los runs de dag_run en dag_run_historico
 # antes de hacer limpieza del historial.
-# Uso: ejecutar ANTES de hacer DELETE FROM dag_run
+# Uso: ejecutar ANTES de delete_dag_run.ps1
 # Fecha: 2026-06-26
 # ============================================================
+
+# ── Configuración — cambia aquí si migras a servidor sin Docker
+$PSQL_CMD = "docker exec -it airflow_postgres_dedicated psql -U airflow -c"
+# $PSQL_CMD = "psql -h localhost -p 5432 -U airflow -d airflow -c"  # ← sin Docker
 
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  archive_dag_run.ps1 — Inicio" -ForegroundColor Cyan
