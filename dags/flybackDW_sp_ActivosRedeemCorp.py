@@ -13,8 +13,8 @@ with DAG(
     dag_id            = "flybackDW_sp_ActivosRedeemCorp",
     description       = "Recarga semanal de tblActivosRedeemCorp — activos con historia",
     schedule_interval = "0 6 * * 1",  # ← Cada lunes a las 6am
-    start_date        = datetime(2026, 5, 18),
-    catchup           = True,        # ← Ejecutar semanas anteriores
+    start_date        = datetime(2026, 6, 26),
+    catchup           = False,       # ← actualizado para evitar catchup
     tags              = ["flybackDW", "semanal", "activos", "mariadb"],
 ) as dag:
     sp_activos_redeem_corp = MySqlOperator(

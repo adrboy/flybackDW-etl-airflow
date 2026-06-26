@@ -24,8 +24,8 @@ SQL_SP_PHONES  = "sql/clients/exec_sp_phones.sql"
 # ── DAG ───────────────────────────────────────────────────
 with DAG(
     dag_id              = "dag_master_gold"
-  , start_date          = datetime(2026, 1, 1)
-  , schedule_interval   = "0 7 * * 1"
+  , start_date          = datetime(2026, 6, 26)  # ← actualizado para evitar catchup
+  , schedule_interval   = "0 7 * * 1#1"  # ← primer lunes del mes — sincronizado con Bronze
   , catchup             = False
   , tags                = ["gold", "master"]
   , template_searchpath = DAGS_DIR

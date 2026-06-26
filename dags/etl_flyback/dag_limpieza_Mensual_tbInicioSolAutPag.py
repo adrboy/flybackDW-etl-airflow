@@ -49,7 +49,7 @@ with DAG(
     dag_id            = DAG_ID,
     description       = "Limpieza mensual de registros huérfanos en tablas Redeem DW",
     schedule_interval = "0 1 2 * *",  # ← Día 2 de cada mes a las 1:00am Cancún
-    start_date        = pendulum.datetime(2026, 6, 18, tz="America/Cancun"),
+    start_date        = pendulum.datetime(2026, 6, 26, tz="America/Cancun"),  # ← actualizado para evitar catchup
     catchup           = False,
     tags              = ["flybackDW", "redeems", "mariadb", "limpieza"],
 ) as dag:

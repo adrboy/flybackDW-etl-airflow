@@ -92,7 +92,7 @@ with DAG(
     dag_id            = DAG_ID,
     description       = "Actualiza tblInicioSolicitados, tblInicioAutorizados y tblInicioPagados en flybackDW",
     schedule_interval = "30 5 * * 1-5",   # ← Lunes a Viernes 5:30am Cancún
-    start_date        = datetime(2026, 6, 11),
+    start_date        = datetime(2026, 6, 26),  # ← actualizado para evitar catchup
     catchup           = False,
     tags              = ["flybackDW", "redeems", "mariadb"],
 ) as dag:
