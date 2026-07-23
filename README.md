@@ -25,10 +25,10 @@ Migración exitosa de 11 pipelines ETL desde **Microsoft SSIS** hacia **Apache A
 
 ## 🔗 Documentos Principales
 
-- [ADR001 — Airflow vs SSIS](adr/ADR001_airflow_vs_ssis.md)
-- [Runbook ETL](runbook/etl_bronze_runbook.md)
-- [Diccionario de Datos](data_dictionary/bronze_layer.md)
-- [US001 — ETL Pipeline](user_stories/US001_bronze_layer.md)
+- [ADR001 — Airflow vs SSIS](docs/etl/adr/ADR001_airflow_vs_ssis.md)
+- [Runbook ETL](docs/etl/runbook/etl_bronze_runbook.md)
+- [Diccionario de Datos](docs/etl/data_dictionary/bronze_layer.md)
+- [US001 — ETL Pipeline](docs/etl/US001_bronze_layer.md)
 
 ---
 
