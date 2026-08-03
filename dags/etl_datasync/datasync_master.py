@@ -1,39 +1,42 @@
 # ═══════════════════════════════════════════════════════
-# DAG : datasync_master
+# DAG : dag_datasync_master
 # Objetivo : Sincronización mensual completa de clientes
 #            GC + FB + BB + VTW → db_general
 #
 # Fase 1 (paralelo)  : gusa_collections, flyback,
 #                      buyback, vacation_center
 # Fase 2 (secuencial): generate_data → validate_country
+#                      → log_estadisticas → notificar
 #
-# Schedule : día 1 de cada mes a la 1:00 AM
-# Carpeta  : datasync/
-# Versión  : 1.0 — 2026-07-29
+# Schedule : primer lunes de cada mes a la 1:00 AM
+#            (si el día 1 cae domingo se ejecuta el lunes)
+# Carpeta  : etl_datasync/
+# Versión  : 2.2 — 2026-07-31
+# Cambios  : dag_id renombrado a dag_datasync_master
 # ═══════════════════════════════════════════════════════
 import sys
 sys.path.insert(0, '/opt/airflow/dags')
 
-from airflow                   import DAG
-from airflow.operators.python  import PythonOperator
-from datetime                  import datetime
-from functools                 import partial
+from airflow                  import DAG
+from airflow.operators.python import PythonOperator
+from datetime                 import datetime
 
 from common.audit_logger   import escribir_log_txt
 from common.email_notifier import send_etl_notification
 from common.db_connections import LOG_PATH
 
-from datasync.operations.gusa_collections import sincronizar_gusa_collections
-from datasync.operations.flyback          import sincronizar_flyback
-from datasync.operations.buyback          import sincronizar_buyback
-from datasync.operations.vacation_center  import sincronizar_vacation_center
-from datasync.operations.generate_data    import generar_data
-from datasync.operations.validate_country import validar_country
+from etl_datasync.operations.gusa_collections import sincronizar_gusa_collections
+from etl_datasync.operations.flyback          import sincronizar_flyback
+from etl_datasync.operations.buyback          import sincronizar_buyback
+from etl_datasync.operations.vacation_center  import sincronizar_vacation_center
+from etl_datasync.operations.generate_data    import generar_data
+from etl_datasync.operations.validate_country import validar_country
+from etl_datasync.operations.log_estadisticas import registrar_estadisticas
 
-DAG_ID = "datasync_master"
+DAG_ID = "dag_datasync_master"
+
 
 # ── Wrappers para PythonOperator ────────────────────────
-# Cada función recibe el dag_id para trazabilidad en logs
 
 def task_gusa_collections():
     sincronizar_gusa_collections(DAG_ID)
@@ -53,11 +56,14 @@ def task_generate_data():
 def task_validate_country():
     validar_country(DAG_ID)
 
+def task_log_estadisticas():
+    registrar_estadisticas(DAG_ID)
+
 def task_notificar():
     mensaje = "\n".join([
         f"DAG: {DAG_ID} — INICIO REPORTE",
         "Fase 1 (paralelo)  : gusa_collections, flyback, buyback, vacation_center",
-        "Fase 2 (secuencial): generate_data → validate_country",
+        "Fase 2 (secuencial): generate_data → validate_country → log_estadisticas",
         f"DAG: {DAG_ID} — FIN ✅",
     ])
     log_path = escribir_log_txt(LOG_PATH, DAG_ID, mensaje)
@@ -71,8 +77,8 @@ def task_notificar():
 # ── DAG ─────────────────────────────────────────────────
 with DAG(
     dag_id            = DAG_ID,
-    description       = "Sincronización mensual GC+FB+BB+VTW → db_general — día 1 a la 1AM",
-    schedule_interval = "0 1 1 * *",
+    description       = "Sincronización mensual GC+FB+BB+VTW → db_general — primer lunes de cada mes 1AM",
+    schedule_interval = "0 1 * * MON#1",
     start_date        = datetime(2026, 8, 1),
     catchup           = False,
     tags              = ["datasync", "mensual", "db_general"],
@@ -105,8 +111,10 @@ with DAG(
         task_id         = "validate_country",
         python_callable = task_validate_country,
     )
-
-    # ── Notificación final ──────────────────────────────
+    log_stats = PythonOperator(
+        task_id         = "log_estadisticas",
+        python_callable = task_log_estadisticas,
+    )
     notificar = PythonOperator(
         task_id         = "notificar",
         python_callable = task_notificar,
@@ -116,8 +124,8 @@ with DAG(
     #
     #  sync_gusa  ──┐
     #  sync_fb    ──┤
-    #               ├──► generate_data ──► validate_country ──► notificar
+    #               ├──► generate_data ──► validate_country ──► log_estadisticas ──► notificar
     #  sync_bb    ──┤
     #  sync_vtw   ──┘
     #
-    [sync_gusa, sync_fb, sync_bb, sync_vtw] >> gen_data >> val_country >> notificar
+    [sync_gusa, sync_fb, sync_bb, sync_vtw] >> gen_data >> val_country >> log_stats >> notificar

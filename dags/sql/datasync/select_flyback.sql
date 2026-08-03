@@ -1,11 +1,10 @@
 -- ═══════════════════════════════════════════════════════
 -- select_flyback.sql
 -- Objetivo : Leer clientes desde customers.fb_clients
--- Origen   : 192.168.10.240  (customers)
--- Versión  : 2.0 — 2026-07-30
--- Cambios  : CTEs para pre-agregar corp, tipo_cambio, redeem
---            antes del JOIN — de 26 segundos a 20 segundos
---            Sin GROUP BY — fb_clients ya es 1 fila por clientid
+-- Origen   : 192.168.10.242  (customers)
+-- Versión  : 2.2 — 2026-07-31
+-- Cambios  : Sin manejo de fechas — sign y activated
+--            llegan como NULL natural desde la BD
 -- ═══════════════════════════════════════════════════════
 WITH corp AS (
     SELECT
@@ -59,8 +58,8 @@ SELECT
     , IFNULL(IF(fb.venta >= 9000,
                 fb.venta / tc.avg_rate,
                 fb.venta), 0)                                                        AS vcert
-    , IFNULL(fb.signdate,  '0001-01-01')                                             AS sign
-    , IFNULL(fb.inicio_r,  '0001-01-01')                                             AS activated
+    , fb.signdate                                                                    AS sign
+    , fb.inicio_r                                                                    AS activated
     , IFNULL(rd.years, 0)                                                            AS years
     , fb.currency                                                                    AS currency
     , IFNULL(e.descrip,   '')                                                        AS status

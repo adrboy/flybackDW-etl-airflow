@@ -2,9 +2,9 @@
 -- select_buyback.sql
 -- Objetivo : Leer clientes desde buyback.clients
 -- Origen   : 192.168.10.242  (buyback)
--- Versión  : 2.0 — 2026-07-30
--- Cambios  : Sin GROUP BY, sin COUNT(*), sin SUM —
---            buyback.clients es 1 a 1 por clientid
+-- Versión  : 2.1 — 2026-07-31
+-- Cambios  : sign  → NULL natural (1 null real, 0 centinelas)
+--            activated → NULLIF '0001-01-01' (98 centinelas)
 -- ═══════════════════════════════════════════════════════
 SELECT
       1                                                                                AS update_id
@@ -34,8 +34,8 @@ SELECT
     , IFNULL(crp.corpname, '')                                                         AS corp
     , 1                                                                                AS ncert
     , IFNULL(c.income,      0)                                                         AS vcert
-    , IFNULL(c.signdate,    '0001-01-01')                                              AS sign
-    , IFNULL(c.factivacion, '0001-01-01')                                              AS activated
+    , c.signdate                                                                       AS sign
+    , NULLIF(c.factivacion, '0001-01-01')                                             AS activated
     , IFNULL(c.period,      0)                                                         AS years
     , 'USD'                                                                            AS currency
     , IFNULL(sb.descrip,   '')                                                         AS status
