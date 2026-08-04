@@ -55,38 +55,38 @@ SELECT DISTINCT
     , GROUP_CONCAT(gc_state)                                                AS gc_state
     , GROUP_CONCAT(gc_dev)                                                  AS gc_dev
     , GROUP_CONCAT(gc_corp)                                                 AS gc_corp
-    , GROUP_CONCAT(gc_credit)                                               AS gc_credit
-    , GROUP_CONCAT(gc_pay_number)                                           AS gc_pay_number
-    , GROUP_CONCAT(gc_paid_number)                                          AS gc_paid_number
-    , GROUP_CONCAT(gc_paid)                                                 AS gc_paid
-    , GROUP_CONCAT(gc_balance)                                              AS gc_balance
-    , GROUP_CONCAT(gc_currency)                                             AS gc_currency
+    , SUM(gc_credit)                                                             AS gc_credit
+    , SUM(gc_pay_number)                                                         AS gc_pay_number
+    , SUM(gc_paid_number)                                                        AS gc_paid_number
+    , SUM(gc_paid)                                                               AS gc_paid
+    , SUM(gc_balance)                                                            AS gc_balance
+    , MAX(gc_currency)                                                           AS gc_currency
     , GROUP_CONCAT(gc_sign)                                                 AS gc_sign
     , GROUP_CONCAT(gc_status)                                               AS gc_status
-    , GROUP_CONCAT(fb_ncert)                                                AS fb_ncert
-    , GROUP_CONCAT(fb_vcert)                                                AS fb_vcert
-    , GROUP_CONCAT(fb_sign)                                                 AS fb_sign
-    , GROUP_CONCAT(fb_activated)                                            AS fb_activated
-    , GROUP_CONCAT(fb_years)                                                AS fb_years
-    , GROUP_CONCAT(fb_currency)                                             AS fb_currency
+    , SUM(fb_ncert)                                                              AS fb_ncert
+    , SUM(fb_vcert)                                                              AS fb_vcert
+    , MAX(fb_sign)                                                               AS fb_sign
+    , MAX(fb_activated)                                                          AS fb_activated
+    , SUM(fb_years)                                                              AS fb_years
+    , MAX(fb_currency)                                                           AS fb_currency
     , GROUP_CONCAT(fb_status)                                               AS fb_status
     , GROUP_CONCAT(fb_country)                                              AS fb_country
     , GROUP_CONCAT(fb_state)                                                AS fb_state
     , GROUP_CONCAT(fb_dev)                                                  AS fb_dev
     , GROUP_CONCAT(fb_corp)                                                 AS fb_corp
-    , GROUP_CONCAT(bb_ncert)                                                AS bb_ncert
-    , GROUP_CONCAT(bb_vcert)                                                AS bb_vcert
-    , GROUP_CONCAT(bb_sign)                                                 AS bb_sign
-    , GROUP_CONCAT(bb_activated)                                            AS bb_activated
-    , GROUP_CONCAT(bb_years)                                                AS bb_years
-    , GROUP_CONCAT(bb_currency)                                             AS bb_currency
+    , SUM(bb_ncert)                                                              AS bb_ncert
+    , SUM(bb_vcert)                                                              AS bb_vcert
+    , MAX(bb_sign)                                                               AS bb_sign
+    , MAX(bb_activated)                                                          AS bb_activated
+    , SUM(bb_years)                                                              AS bb_years
+    , MAX(bb_currency)                                                           AS bb_currency
     , GROUP_CONCAT(bb_status)                                               AS bb_status
     , GROUP_CONCAT(bb_country)                                              AS bb_country
     , GROUP_CONCAT(bb_state)                                                AS bb_state
     , GROUP_CONCAT(bb_dev)                                                  AS bb_dev
     , GROUP_CONCAT(bb_corp)                                                 AS bb_corp
-    , GROUP_CONCAT(vtw_capdata)                                             AS vtw_capdata
-    , GROUP_CONCAT(vtw_fee)                                                 AS vtw_fee
+    , MAX(vtw_capdata)                                                           AS vtw_capdata
+    , SUM(vtw_fee)                                                               AS vtw_fee
     , GROUP_CONCAT(vtw_status)                                              AS vtw_status
     , GROUP_CONCAT(vtw_country)                                             AS vtw_country
     , GROUP_CONCAT(vtw_state)                                               AS vtw_state

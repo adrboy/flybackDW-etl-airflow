@@ -2,11 +2,12 @@
 # common/db_datasync.py
 # Objetivo : Motor de sincronización MariaDB → MariaDB
 #            Reutilizable para todas las operaciones de
-#            etl_datasync — nadie más instancia MySqlHook
-# Versión  : 1.4 — 2026-07-31
-# Cambios  : mysql-connector-python en lugar de MySQLdb
-#            executemany optimizado — un solo INSERT multi-values
-#            BATCH_SIZE 50000 — menos roundtrips
+#            etl_datasync — nadie más instancia conexiones
+# Versión  : 2.1 — 2026-08-03
+# Cambios  : BATCH_SIZE ajustado a 10,000
+#            max_allowed_packet del servidor es 16MB
+#            50,000 filas x ~500 bytes = ~25MB > 16MB límite
+#            10,000 filas x ~500 bytes = ~5MB  < 16MB seguro
 # ═══════════════════════════════════════════════════════
 import traceback
 import mysql.connector
@@ -14,7 +15,7 @@ from airflow.hooks.base import BaseHook
 from common.sql_loader   import cargar_sql
 
 FECHA_INVALIDA = '0001-01-01'
-BATCH_SIZE     = 50000
+BATCH_SIZE     = 10000
 
 
 # ════════════════════════════════════════════════════════
@@ -49,21 +50,39 @@ def limpiar_fechas(filas: list, indices: list) -> list:
 def _get_conn(conn_id: str):
     """
     Crea conexión mysql-connector-python usando credenciales de Airflow.
-    mysql-connector-python optimiza executemany como multi-values INSERT.
+    Conexiones dedicadas por BD evitan Commands out of sync —
+    mismo patrón que el C# original (dbGusa, dbFlyBack, dbBuyBack, etc).
     """
     c = BaseHook.get_connection(conn_id)
     return mysql.connector.connect(
-        host     = c.host,
-        port     = c.port or 3306,
-        user     = c.login,
-        password = c.password,
-        database = c.schema,
+        host       = c.host,
+        port       = c.port or 3306,
+        user       = c.login,
+        password   = c.password,
+        database   = c.schema,
         autocommit = False,
+        use_pure   = True,    # evita Commands out of sync de la extension C
     )
 
 
+def _insertar_en_lotes(cursor, sql_insert: str, filas: list, indices_fecha: list = None) -> int:
+    """
+    Inserta filas en lotes de BATCH_SIZE.
+    mysql-connector-python optimiza executemany como INSERT multi-values.
+    BATCH_SIZE calibrado para respetar max_allowed_packet = 16MB.
+    """
+    total = 0
+    for i in range(0, len(filas), BATCH_SIZE):
+        lote = filas[i:i + BATCH_SIZE]
+        if indices_fecha:
+            lote = limpiar_fechas(lote, indices_fecha)
+        cursor.executemany(sql_insert, lote)
+        total += len(lote)
+    return total
+
+
 # ════════════════════════════════════════════════════════
-# Motor de sincronización — mismo servidor, dos cursores
+# Motor de sincronización — mismo servidor
 # ════════════════════════════════════════════════════════
 
 def sincronizar(
@@ -77,41 +96,29 @@ def sincronizar(
 ) -> int:
     """
     Sincroniza origen → destino en el mismo servidor MariaDB.
-    Usa UNA conexión con DOS cursores — cur_select para leer
-    y cur_insert para escribir — sin contención entre sesiones.
-    Procesa en lotes de BATCH_SIZE con mysql-connector-python.
+    Usa conexión dedicada mysql-connector-python.
+    fetchall() consume todos los resultados antes de insertar.
     """
     nombre = sql_select.split('/')[-1].replace('.sql', '')
     conn   = None
 
     try:
-        conn = _get_conn(conn_id)
+        conn   = _get_conn(conn_id)
+        cursor = conn.cursor()
 
-        cur_select = conn.cursor()
-        cur_insert = conn.cursor()
-
-        # ── Truncar destino ──────────────────────────────
         print(f"[{dag_id}] {nombre} — truncando tabla...")
-        cur_insert.execute(cargar_sql(sql_truncate))
+        cursor.execute(cargar_sql(sql_truncate))
 
-        # ── Leer origen ──────────────────────────────────
         print(f"[{dag_id}] {nombre} — leyendo origen...")
-        cur_select.execute(cargar_sql(sql_select))
+        cursor.execute(cargar_sql(sql_select))
+        filas = cursor.fetchall()
+        total_leidas = len(filas)
+        print(f"[{dag_id}] {nombre} — {total_leidas:,} registros leídos")
 
-        # ── Insertar en lotes ────────────────────────────
-        total          = 0
         sql_insert_str = cargar_sql(sql_insert)
+        total = _insertar_en_lotes(cursor, sql_insert_str, filas, indices_fecha)
 
-        while True:
-            filas = cur_select.fetchmany(BATCH_SIZE)
-            if not filas:
-                break
-            if indices_fecha:
-                filas = limpiar_fechas(filas, indices_fecha)
-            cur_insert.executemany(sql_insert_str, filas)
-            total += len(filas)
-
-        cur_insert.execute(sql_log)
+        cursor.execute(sql_log)
         conn.commit()
         print(f"[{dag_id}] {nombre} — OK ✅  ({total:,} filas)")
         return total
@@ -143,8 +150,8 @@ def sincronizar_entre_servidores(
 ) -> int:
     """
     Sincroniza origen → destino en servidores DISTINTOS MariaDB.
-    Dos conexiones físicas separadas — una por servidor.
-    Procesa en lotes de BATCH_SIZE con mysql-connector-python.
+    Dos conexiones dedicadas — una por BD origen, una por BD destino.
+    Mismo patrón que C#: dbOrigen.Fill() → dbGlobal.Execute()
     """
     nombre       = sql_select.split('/')[-1].replace('.sql', '')
     conn_origen  = None
@@ -157,26 +164,24 @@ def sincronizar_entre_servidores(
         cur_origen  = conn_origen.cursor()
         cur_destino = conn_destino.cursor()
 
-        # ── Truncar destino ──────────────────────────────
         print(f"[{dag_id}] {nombre} — truncando tabla...")
         cur_destino.execute(cargar_sql(sql_truncate))
 
-        # ── Leer origen ──────────────────────────────────
         print(f"[{dag_id}] {nombre} — leyendo origen ({conn_id_origen})...")
         cur_origen.execute(cargar_sql(sql_select))
+        filas = cur_origen.fetchall()
+        total_leidas = len(filas)
+        print(f"[{dag_id}] {nombre} — {total_leidas:,} registros leídos")
 
-        # ── Insertar en lotes ────────────────────────────
-        total          = 0
+        # ── Cerrar origen antes de insertar ────────────────
+        # mysql-connector-python da Commands out of sync si
+        # cur_origen queda abierto mientras cur_destino inserta
+        cur_origen.close()
+        conn_origen.close()
+        conn_origen = None
+
         sql_insert_str = cargar_sql(sql_insert)
-
-        while True:
-            filas = cur_origen.fetchmany(BATCH_SIZE)
-            if not filas:
-                break
-            if indices_fecha:
-                filas = limpiar_fechas(filas, indices_fecha)
-            cur_destino.executemany(sql_insert_str, filas)
-            total += len(filas)
+        total = _insertar_en_lotes(cur_destino, sql_insert_str, filas, indices_fecha)
 
         cur_destino.execute(sql_log)
         conn_destino.commit()
