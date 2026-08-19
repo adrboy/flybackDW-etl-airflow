@@ -68,7 +68,7 @@ with DAG(
     dag_id            = DAG_ID,
     description       = "Inserta mes cerrado en tbl_historico_cobranza — dia 1 de cada mes 6am",
     schedule_interval = "0 6 1 * *",    # ← dia 1 de cada mes a las 6am Cancun
-    start_date        = datetime(2026, 7, 2),
+    start_date        = datetime(2026, 9, 1, 6, 0, 0), # ← primer dia de cada mes a las 6am Cancun
     catchup           = False,
     tags              = ["flybackDW", "historico", "mariadb"],
 ) as dag:
