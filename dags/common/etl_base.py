@@ -16,6 +16,9 @@
 #   - Placeholders %s → ? (sintaxis pyodbc)
 #   - Nota: NO hay rollback — patrón INCREMENTAL
 #     los lotes ya commiteados se preservan ante fallo parcial
+# CAMBIOS v3.1:
+#   - Diagnóstico fila por fila en except — identifica columna
+#     y valor exacto que causó el error de truncado o tipo
 # ═══════════════════════════════════════════════════════
 import traceback
 import pyodbc
@@ -60,6 +63,25 @@ def get_max_id(mssql_conn_id: str, tabla_destino: str) -> int:
     finally:
         if conn is not None:
             conn.close()
+
+
+def _diagnosticar_lote(dag_id: str, lote: list):
+    """
+    Diagnóstico fila por fila cuando executemany falla.
+    Muestra posición, longitud y valor de columnas sospechosas.
+    Solo se llama desde el except — no afecta el flujo normal.
+    """
+    print(f"[DAG: {dag_id}] — Iniciando diagnóstico de lote ({len(lote)} filas)...")
+    for i, fila in enumerate(lote):
+        for j, valor in enumerate(fila):
+            if isinstance(valor, str) and len(valor) > 20:
+                print(
+                    f"[DAG: {dag_id}] — "
+                    f"Fila {i} | Col posición {j} | "
+                    f"longitud: {len(valor)} | "
+                    f"valor: '{valor[:60]}{'...' if len(valor) > 60 else ''}'"
+                )
+    print(f"[DAG: {dag_id}] — Diagnóstico completado")
 
 
 def ejecutar_insert(
@@ -132,8 +154,14 @@ def ejecutar_insert(
         return filas_insertadas
 
     except Exception as e:
-        print(f"[DAG: {dag_id}] — ERROR detectado en lote {filas_insertadas // BATCH_SIZE + 1}")
+        num_lote = filas_insertadas // BATCH_SIZE + 1
+        print(f"[DAG: {dag_id}] — ERROR detectado en lote {num_lote}")
         print(f"[DAG: {dag_id}] — Filas procesadas antes del fallo: {filas_insertadas}")
+        # ── Diagnóstico detallado — solo en error ─────────
+        try:
+            _diagnosticar_lote(dag_id, lote)
+        except Exception as diag_error:
+            print(f"[DAG: {dag_id}] — Diagnóstico falló: {str(diag_error)}")
         print(f"[DAG: {dag_id}] — {traceback.format_exc()}")
         # NO rollback — INCREMENTAL, preservar lotes ya commiteados
         raise
