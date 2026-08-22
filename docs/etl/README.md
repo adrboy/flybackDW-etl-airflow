@@ -3,7 +3,7 @@
 **Proyecto:** Migración ETL SSIS → Apache Airflow  
 **Autor:** Andrés — Gusacapital  
 **Fecha inicio:** Mayo 2026  
-**Última actualización:** 22/06/2026  
+**Última actualización:** 2026-08-21  
 **Estado:** ✅ Homologación v2 completada — clients, phones y gold
 
 ---
@@ -236,6 +236,8 @@ dags/
 | v2.2 | 19/06/2026 | dag_id + traceback + blindaje conexiones finally |
 | v2.3 | 22/06/2026 | get_max_id → SQL externo, cero SQL embebido |
 | v2.4 | 22/06/2026 | Blindaje conexiones + log detallado en except |
+| v3.0 | 19/08/2026 | pyodbc + fast_executemany — rendimiento máximo |
+| v3.1 | 20/08/2026 | `_diagnosticar_lote` — diagnóstico fila/columna en except |
 
 ### etl_basephone.py (phones)
 
@@ -285,6 +287,21 @@ dags/
 | DAG | Duración | Estado |
 |---|---|---|
 | dag_master_gold | 15 seg | ✅ |
+
+---
+
+## Data Dictionary
+
+Contrato de columnas por DAG — origen MariaDB → Silver SQL Server.
+
+| DAG | Archivo |
+|---|---|
+| `dag_clientsfi_240` | [data_dictionary/clients/clientsfi_240.md](data_dictionary/clients/clientsfi_240.md) |
+| `dag_clientsvc_240` | [data_dictionary/clients/clientsvc_240.md](data_dictionary/clients/clientsvc_240.md) |
+| `dag_clientsfb_242` | [data_dictionary/clients/clientsfb_242.md](data_dictionary/clients/clientsfb_242.md) |
+| `dag_clientsbb_242` | [data_dictionary/clients/clientsbb_242.md](data_dictionary/clients/clientsbb_242.md) |
+| `dag_clientsml_242` | [data_dictionary/clients/clientsml_242.md](data_dictionary/clients/clientsml_242.md) |
+| Bronze & Gold Layer | [data_dictionary/bronze_layer.md](data_dictionary/bronze_layer.md) |
 
 ---
 
