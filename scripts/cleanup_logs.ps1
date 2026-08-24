@@ -1,17 +1,26 @@
 # ============================================
-# cleanup_logs.ps1
+# cleanup_logs.ps1  v2.0
 # Limpieza de logs antiguos de Airflow
 # Uso: .\cleanup_logs.ps1
+# v2.0 - 2026-08-24: salida a archivo de historial
 # ============================================
 
-$logBase    = "C:\Users\GUSA CAPITAL\Documents\DockersETL\logs"
-$diasLogs   = 30
-$diasTxt    = 90
+$logBase      = "C:\Users\GUSA CAPITAL\Documents\DockersETL\logs"
+$diasLogs     = 30
+$diasTxt      = 90
+$historialDir = "C:\Users\GUSA CAPITAL\Documents\DockersETL\scripts\historial"
+$historialFile = "$historialDir\cleanup_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+
+# Crear carpeta de historial si no existe
+if (-not (Test-Path $historialDir)) {
+    New-Item -ItemType Directory -Path $historialDir | Out-Null
+}
 
 function Write-Log {
     param($mensaje)
     $linea = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $mensaje"
     Write-Host $linea
+    Add-Content -Path $historialFile -Value $linea
 }
 
 Write-Log "======================================"

@@ -54,7 +54,7 @@ source.clientsfi
 | 17 | `egreso` | `int(1)` NOT NULL | — | `int` | Fecha egreso numérica |
 | 18 | `rank` | `int(1)` NOT NULL | — | `int` | Ranking del cliente |
 | 19 | `EstatusN` | `decimal(5,3)` NOT NULL | — | `decimal(11,3)` | Estatus numérico — ampliado 2026-08-19 |
-| 20 | `EstatusL` | `varchar(64)` | — | `nvarchar(60)` | Estatus literal |
+| 20 | `EstatusL` | `varchar(64)` | — | `nvarchar(64)` | Estatus literal — ampliado 2026-08-20 (era 20) |
 | — | `createdAt` | *(no viene del origen)* | `NOW()` en etl_base.py | `datetime` | Fecha de inserción ETL en Silver |
 | — | `updatedAt` | *(no viene del origen)* | `NULL` en etl_base.py | `datetime2` | Pendiente v2 — detección de cambios |
 | — | `deletedAt` | *(no viene del origen)* | `NULL` en etl_base.py | `nvarchar(255)` | Pendiente v2 — detección de borrados |
