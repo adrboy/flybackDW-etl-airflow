@@ -2,7 +2,7 @@
 # etl_base.py
 # Objetivo: Motor de ejecución ETL INCREMENTAL reutilizable
 # Carpeta: common/
-# Versión: 3.0 — 2026-06-23 (pyodbc + fast_executemany = True)
+# Versión: 3.2 — 2026-08-24
 # ═══════════════════════════════════════════════════════
 # CAMBIOS v2.1: NULL → None para compatibilidad pymssql
 # CAMBIOS v2.2: dag_id + traceback + blindaje conexiones
@@ -19,13 +19,20 @@
 # CAMBIOS v3.1:
 #   - Diagnóstico fila por fila en except — identifica columna
 #     y valor exacto que causó el error de truncado o tipo
+# CAMBIOS v3.2:
+#   - Integración con error_classifier.py
+#   - Reporte estructurado SUCCESS/FAILED en log .txt y email
+#   - Referencia Airflow automática en reporte de error
+#   - Parámetros vista_origen + tabla_destino para reporte
 # ═══════════════════════════════════════════════════════
 import traceback
+import time
 import pyodbc
 from datetime                                import datetime
 from airflow.hooks.base                      import BaseHook
 from airflow.providers.mysql.hooks.mysql     import MySqlHook
 from common.sql_loader                       import cargar_sql
+from common.error_classifier                 import generar_reporte_error, generar_reporte_success
 
 BATCH_SIZE = 1000
 SQL_MAX_ID = "sql/clients/get_max_id.sql"
@@ -65,38 +72,22 @@ def get_max_id(mssql_conn_id: str, tabla_destino: str) -> int:
             conn.close()
 
 
-def _diagnosticar_lote(dag_id: str, lote: list):
-    """
-    Diagnóstico fila por fila cuando executemany falla.
-    Muestra posición, longitud y valor de columnas sospechosas.
-    Solo se llama desde el except — no afecta el flujo normal.
-    """
-    print(f"[DAG: {dag_id}] — Iniciando diagnóstico de lote ({len(lote)} filas)...")
-    for i, fila in enumerate(lote):
-        for j, valor in enumerate(fila):
-            if isinstance(valor, str) and len(valor) > 20:
-                print(
-                    f"[DAG: {dag_id}] — "
-                    f"Fila {i} | Col posición {j} | "
-                    f"longitud: {len(valor)} | "
-                    f"valor: '{valor[:60]}{'...' if len(valor) > 60 else ''}'"
-                )
-    print(f"[DAG: {dag_id}] — Diagnóstico completado")
-
-
 def ejecutar_insert(
     dag_id          : str
   , mariadb_conn_id : str
   , mssql_conn_id   : str
-  , sql_select      : str    # ← ruta relativa al .sql de SELECT
-  , sql_insert      : str    # ← ruta relativa al .sql de INSERT
+  , sql_select      : str
+  , sql_insert      : str
   , max_id          : int
+  , vista_origen    : str      = ""     # ← para reporte
+  , tabla_destino   : str      = ""     # ← para reporte
   , etl_fecha       : datetime = None
-) -> int:
+  , airflow_context : dict     = None   # ← contexto Airflow para referencia en error
+) -> tuple:
     """
     Ejecuta el ETL completo INCREMENTAL con pyodbc + fast_executemany.
     Commit por lote — patrón INCREMENTAL: preserva lotes anteriores
-    ante un fallo parcial (diferencia clave vs etl_basephone).
+    ante un fallo parcial.
 
     Args:
         dag_id          : Identificador del DAG para logs
@@ -105,10 +96,13 @@ def ejecutar_insert(
         sql_select      : Ruta relativa al archivo SELECT .sql
         sql_insert      : Ruta relativa al archivo INSERT .sql
         max_id          : MAX(clientid) del destino para filtrar
+        vista_origen    : Nombre de la vista origen (para reporte)
+        tabla_destino   : Nombre de la tabla destino (para reporte)
         etl_fecha       : Fecha de ejecución ETL (default: NOW)
+        airflow_context : Contexto de Airflow — para referencia en error
 
     Returns:
-        Total de filas insertadas
+        (filas_insertadas, reporte) — int + string del reporte
     """
     if etl_fecha is None:
         etl_fecha = datetime.now()
@@ -123,6 +117,21 @@ def ejecutar_insert(
     hook_origen  = MySqlHook(mysql_conn_id=mariadb_conn_id)
     conn_origen  = None
     conn_destino = None
+    filas_insertadas = 0
+    lote             = []
+    inicio           = time.time()
+
+    # ── Extraer referencia Airflow si viene el contexto ───
+    run_id  = None
+    task_id = None
+    attempt = None
+    if airflow_context:
+        try:
+            run_id  = airflow_context.get("run_id")
+            task_id = airflow_context.get("task_instance").task_id
+            attempt = airflow_context.get("task_instance").try_number
+        except Exception:
+            pass
 
     try:
         conn_origen  = hook_origen.get_conn()
@@ -130,40 +139,50 @@ def ejecutar_insert(
 
         cursor_origen  = conn_origen.cursor()
         cursor_destino = conn_destino.cursor()
-        cursor_destino.fast_executemany = True   # ← alto rendimiento
+        cursor_destino.fast_executemany = True
 
         # ── SELECT en MariaDB ─────────────────────────────
         cursor_origen.execute(query_select)
-        filas_insertadas = 0
 
-        # ── INSERT en lotes (fast_executemany) ────────────
-        # Commit por lote — INCREMENTAL
+        # ── INSERT en lotes ───────────────────────────────
         while True:
             filas = cursor_origen.fetchmany(BATCH_SIZE)
             if not filas:
                 break
 
-            # createdAt = etl_fecha, updatedAt = None, deletedAt = None
             lote = [fila + (etl_fecha, None, None) for fila in filas]
-
             cursor_destino.executemany(query_insert, lote)
             conn_destino.commit()
             filas_insertadas += len(lote)
 
-        print(f"[DAG: {dag_id}] — ETL OK | Filas insertadas: {filas_insertadas:,}")
-        return filas_insertadas
+        # ── Reporte SUCCESS ───────────────────────────────
+        segundos = time.time() - inicio
+        reporte  = generar_reporte_success(
+            dag_id        = dag_id
+          , vista_origen  = vista_origen
+          , tabla_destino = tabla_destino
+          , max_id        = max_id
+          , filas_ok      = filas_insertadas
+          , segundos      = segundos
+        )
+        print(f"[DAG: {dag_id}] — ETL OK | Filas: {filas_insertadas:,} | {segundos:.1f}s")
+        return filas_insertadas, reporte
 
     except Exception as e:
-        num_lote = filas_insertadas // BATCH_SIZE + 1
-        print(f"[DAG: {dag_id}] — ERROR detectado en lote {num_lote}")
-        print(f"[DAG: {dag_id}] — Filas procesadas antes del fallo: {filas_insertadas}")
-        # ── Diagnóstico detallado — solo en error ─────────
-        try:
-            _diagnosticar_lote(dag_id, lote)
-        except Exception as diag_error:
-            print(f"[DAG: {dag_id}] — Diagnóstico falló: {str(diag_error)}")
-        print(f"[DAG: {dag_id}] — {traceback.format_exc()}")
-        # NO rollback — INCREMENTAL, preservar lotes ya commiteados
+        # ── Reporte FAILED ────────────────────────────────
+        reporte = generar_reporte_error(
+            dag_id        = dag_id
+          , vista_origen  = vista_origen
+          , tabla_destino = tabla_destino
+          , max_id        = max_id
+          , filas_ok      = filas_insertadas
+          , error         = e
+          , run_id        = run_id
+          , task_id       = task_id
+          , attempt       = attempt
+          , lote          = lote
+        )
+        print(reporte)
         raise
 
     finally:

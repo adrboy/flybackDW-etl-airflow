@@ -147,6 +147,29 @@ docker exec -it airflow_postgres_dedicated psql -U airflow -c "SELECT COUNT(*) F
 
 ---
 
+## 14. Limpieza de logs `.txt` ETL
+
+```powershell
+# PASO 1 — VER todos los logs con fecha y tamaño
+Get-ChildItem "C:\Users\GUSA CAPITAL\Documents\DockersETL\logs\*.txt" `
+  | Sort-Object LastWriteTime `
+  | Select-Object Name, LastWriteTime, @{N='KB';E={[math]::Round($_.Length/1KB,1)}}
+
+# PASO 2 — FILTRAR — ver qué se borraría antes de una fecha (sin borrar)
+Get-ChildItem "C:\Users\GUSA CAPITAL\Documents\DockersETL\logs\*.txt" `
+  | Where-Object { $_.LastWriteTime -lt (Get-Date "2026-08-20") } `
+  | Select-Object Name, LastWriteTime
+
+# PASO 3 — BORRAR — ejecutar el borrado real (cambiar la fecha según necesidad)
+Get-ChildItem "C:\Users\GUSA CAPITAL\Documents\DockersETL\logs\*.txt" `
+  | Where-Object { $_.LastWriteTime -lt (Get-Date "2026-08-20") } `
+  | Remove-Item
+```
+> ⚠️ **Flujo correcto siempre:** primero PASO 2 para revisar, luego PASO 3 para borrar.  
+> Cambiar la fecha `"2026-08-20"` según el criterio de limpieza deseado.
+
+---
+
 ## Notas
 
 | Tema | Detalle |
