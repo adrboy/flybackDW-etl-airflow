@@ -19,7 +19,7 @@ services:
   # Interfaz web de Airflow
   airflow-webserver:
     build: .                          # ← imagen custom con msodbcsql18
-    image: airflow-custom:2.9.3       # ← nombre de la imagen construida
+    image: airflow-custom:2.11.2       # ← nombre de la imagen construida
     container_name: airflow_webserver
     depends_on:
       postgres:
@@ -44,7 +44,7 @@ services:
   # El cerebro que ejecuta las tareas
   airflow-scheduler:
     build: .                          # ← imagen custom con msodbcsql18
-    image: airflow-custom:2.9.3       # ← nombre de la imagen construida
+    image: airflow-custom:2.11.2       # ← nombre de la imagen construida
     container_name: airflow_scheduler
     depends_on:
       postgres:

@@ -170,6 +170,44 @@ Get-ChildItem "C:\Users\GUSA CAPITAL\Documents\DockersETL\logs\*.txt" `
 
 ---
 
+## 15. Actualización de Airflow y setup inicial
+
+```powershell
+# ── Actualizar versión de Airflow ────────────────────────
+# 1. Editar Dockerfile y docker-compose.yml con la nueva versión
+# 2. Reconstruir la imagen
+cd "C:\Users\GUSA CAPITAL\Documents\DockersETL"
+docker-compose down
+docker-compose build --no-cache
+
+# 3. Migrar la base de datos de Airflow
+docker-compose run --rm airflow-scheduler airflow db migrate
+
+# 4. Levantar todo
+docker-compose up -d
+
+# ── Crear usuario admin (primera vez o si se perdió) ─────
+docker-compose exec airflow-scheduler airflow users create `
+  --username admin `
+  --password admin `
+  --firstname Admin `
+  --lastname User `
+  --role Admin `
+  --email admin@gusacapital.com
+
+# ── Resetear contraseña si ya existe el usuario ──────────
+docker-compose exec airflow-scheduler airflow users reset-password `
+  --username admin `
+  --password admin
+
+# ── Verificar versión instalada ───────────────────────────
+docker-compose exec airflow-scheduler airflow version
+```
+> ⚠️ **Importante:** Siempre hacer `db migrate` después de actualizar la imagen.  
+> El historial de DAGs y runs se preserva si el volumen `postgres_data` no se borra.
+
+---
+
 ## Notas
 
 | Tema | Detalle |
