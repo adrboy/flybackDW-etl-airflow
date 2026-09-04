@@ -3,7 +3,7 @@
 # Objetivo: Actualizar tblInicioSolicitados, tblInicioAutorizados
 #           y tblInicioPagados en flybackDW
 # Carpeta: etl_flyback/
-# Versión: 3.0 — 2026-06-25 (función ejecutar_sp() reutilizable, sin SQL embebido)
+# Versión: 3.1 — 2026-09-03 (schedule: 5:30am y 2:30pm Lun-Vie)
 # ═══════════════════════════════════════════════════════
 from airflow import DAG
 from airflow.operators.python import PythonOperator
@@ -91,8 +91,8 @@ def generar_log_y_notificar():
 with DAG(
     dag_id            = DAG_ID,
     description       = "Actualiza tblInicioSolicitados, tblInicioAutorizados y tblInicioPagados en flybackDW",
-    schedule_interval = "30 5 * * 1-5",   # ← Lunes a Viernes 5:30am Cancún
-    start_date        = datetime(2026, 6, 26),  # ← actualizado para evitar catchup
+    schedule_interval = "30 5,14 * * 1-5",   # ← 5:30am y 2:30pm Lun-Vie Cancún
+    start_date        = datetime(2026, 6, 26),
     catchup           = False,
     tags              = ["flybackDW", "redeems", "mariadb"],
 ) as dag:

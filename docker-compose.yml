@@ -25,6 +25,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      - AIRFLOW__CORE__FERNET_KEY=gpYr-t7QSqzzy3Ma9Rneo_ye1LfmqO-8EDccRRdIxVs=
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
@@ -50,6 +51,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      - AIRFLOW__CORE__FERNET_KEY=gpYr-t7QSqzzy3Ma9Rneo_ye1LfmqO-8EDccRRdIxVs=
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - EMAIL_USER=${EMAIL_USER}
