@@ -1,11 +1,11 @@
 # flybackDW_sp_ActivosRedeemCorp
 
-> **Ruta DAG:**  `dags\etl_flyback\flybackDW_sp_ActivosRedeemCorp.py`
-> **Ruta SP:**   `mariadb_sql\flybackDW\03 - Redeems\sp_ActivosRedeemCorp.sql`
-> **Ruta SQL Auditoría:** `mariadb_sql\flybackDW\03 - Redeems\AuditoriaIgualacionActivos.sql`
+> **Ruta DAG:**  `C:\Users\GUSA CAPITAL\Documents\DockersETL\dags\etl_flyback\flybackDW_sp_ActivosRedeemCorp.py`
+> **Ruta SP:**   `C:\Users\GUSA CAPITAL\Documents\mariadb_sql\flybackDW\03 - Redeems\cns_RedeemCorporativo.sql`
+> **Ruta SQL Auditoría:** `C:\Users\GUSA CAPITAL\Documents\mariadb_sql\flybackDW\03 - Redeems\AuditoriaActivos.sql`
 > **Módulo / sistema:** flybackDW — SmartData Activos Redeem
 > **Responsable:** Andrés José Sarria Correa
-> **Última actualización:** 2026-09-04
+> **Última actualización:** 2026-09-02
 > **Versión documento:** v2.0
 
 ---
@@ -78,12 +78,13 @@ La tabla es la **fuente de verdad** para los reportes de activos por corporativo
 
 **RN-01: Exclusión de huérfanos via `redeem_no = 1`**
 - Solo se incluyen clientes que tienen al menos un redeem con `redeem_no = 1`.
-- Garantiza que el cliente tiene historia real de redeems y no es un registro huérfano.
+- Esto garantiza que el cliente tiene historia real de redeems y no es un registro huérfano o incompleto.
 - Hay 4 clientes con secuencias corruptas que fueron corregidos manualmente (junio 2026).
 
 **RN-02: Recarga completa semanal — TRUNCATE + INSERT**
 - El SP hace recarga completa cada lunes — no es incremental.
-- El lunes fue elegido intencionalmente: el Data Engineer está presente para monitorear.
+- La frecuencia semanal es suficiente ya que los activos no cambian diariamente.
+- El lunes fue elegido intencionalmente: el Data Engineer está presente para monitorear y actuar si algo falla.
 
 **RN-03: Mapeo de pack**
 - En `customers.fb_clients` el campo se llama `dppaidin`.
@@ -98,6 +99,7 @@ La tabla es la **fuente de verdad** para los reportes de activos por corporativo
 **RN-05: Oportunidad — redeems históricos**
 - La columna `Oportunidad` cuenta cuántos redeems anteriores al año actual tiene el cliente.
 - Fórmula: `COUNT(DISTINCT IF(YEAR(XII.inicio_r) < YEAR(NOW()), XII.redeem_no, NULL))`.
+- Representa el "potencial histórico" del cliente para análisis de breakage acumulado.
 
 ---
 
@@ -105,8 +107,8 @@ La tabla es la **fuente de verdad** para los reportes de activos por corporativo
 
 Para verificar que la tabla está sincronizada con la fuente onpremise, existe una query de auditoría que compara año por año. Si todos los años dan **diferencias = 0** la tabla está correcta.
 
-**Archivo:** `AuditoriaIgualacionActivos.sql`
-**Ruta:** `mariadb_sql\flybackDW\03 - Redeems\AuditoriaIgualacionActivos.sql`
+**Archivo:** `AuditoriaActivos.sql`
+**Ruta:** `C:\Users\GUSA CAPITAL\Documents\mariadb_sql\flybackDW\03 - Redeems\AuditoriaActivos.sql`
 
 **Cómo interpretar el resultado:**
 
@@ -124,14 +126,15 @@ Para verificar que la tabla está sincronizada con la fuente onpremise, existe u
 
 **Formulario:** `Reporte de Redeem x Corporativo`
 **Clase VB.NET:** `ReporteRedeemCorporativo_II`
+**Proyecto:** `Dashboard_flyback\flybackdash\03-Redeems\ReporteRedeemCorporativo_II.vb`
 **SP intermedio:** `flybackDW.cns_RedeemCorporativo(p_anio INT)`
-**Ruta SP:** `mariadb_sql\flybackDW\03 - Redeems\cns_RedeemCorporativo.sql`
+**Ruta SP:** `C:\Users\GUSA CAPITAL\Documents\mariadb_sql\flybackDW\03 - Redeems\cns_RedeemCorporativo.sql`
 
 El formulario tiene dos vistas:
 - **Global** — una fila por corporativo con totales.
 - **Pack / NoPack** — misma fila separada en dos columnas: clientes PACK y NO PACK.
 
-En modo **Histórico** (años anteriores al actual) el conteo de activos incluye los finalizados (`statusf = -4`) sumados a los vigentes.
+En modo **Histórico** (años anteriores al actual) el conteo de activos incluye los finalizados (`statusf = -4`) sumados a los vigentes — esto es correcto por diseño.
 
 ---
 
@@ -141,7 +144,7 @@ En modo **Histórico** (años anteriores al actual) el conteo de activos incluye
 |---|---|
 | Error en el SP | Se inserta registro de error en `flybackDW.tblJobsRegistros`. Airflow marca la tarea como `failed`. Se envía email de alerta. |
 | Sin activos | SP ejecuta con 0 registros — comportamiento anormal, investigar. |
-| Tabla desactualizada | Correr `AuditoriaIgualacionActivos.sql` para confirmar diferencias, luego ejecutar SP manualmente: `CALL flybackDW.sp_ActivosRedeemCorp();` |
+| Tabla desactualizada | Correr `AuditoriaActivos.sql` para confirmar diferencias, luego ejecutar SP manualmente desde Navicat: `CALL flybackDW.sp_ActivosRedeemCorp();` |
 
 ---
 
@@ -169,7 +172,7 @@ En modo **Histórico** (años anteriores al actual) el conteo de activos incluye
 | Fecha | Versión | Cambio |
 |---|---|---|
 | 2026-05-01 | v1.0 DAG | Implementación inicial con `MySqlOperator` |
-| 2026-07-03 | v2.0 DAG | Migrado a `PythonOperator` con `email_notifier` + `audit_logger` |
-| 2026-09-01 | v1.0 SP `cns_RedeemCorporativo` | Eliminado `CROSS JOIN flybackDW.tbwpack XI` — causaba `ACTIVOSPACK = 0` y `ACTIVOSNOPACK = 0` en el formulario |
-| 2026-09-01 | v1.0 VB.NET `ViewPackBn` | Fix modo Histórico: `r.ActivosPack + r.ActivosPackII` |
-| 2026-09-04 | v2.0 Doc | Documentación actualizada con auditoría, referencias cruzadas y rutas corregidas |
+| 2026-07-03 | v2.0 DAG | Migrado a `PythonOperator` con `email_notifier` + `audit_logger`. Movido a `dags/etl_flyback/` |
+| 2026-09-01 | v1.0 SP `cns_RedeemCorporativo` | Eliminado `CROSS JOIN flybackDW.tbwpack XI` — causaba `ACTIVOSPACK = 0` y `ACTIVOSNOPACK = 0` en el formulario aunque la tabla tuviera datos correctos |
+| 2026-09-01 | v1.0 VB.NET `ViewPackBn` | Corregida lógica modo Histórico: cambiado `r.ActivosPackII` → `r.ActivosPack + r.ActivosPackII` para incluir activos vigentes + finalizados |
+| 2026-09-02 | v2.0 Doc | Documentación actualizada con auditoría, fix del SP, fix VB.NET y referencias cruzadas |
