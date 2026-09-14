@@ -3,7 +3,12 @@
 # Objetivo: Recarga semanal de tblActivosRedeemCorp
 #           ejecutando sp_ActivosRedeemCorp() cada lunes 6am
 # Carpeta: etl_flyback/
-# Version: 2.0 — 2026-07-03
+# Version: 3.0 — 2026-09-14
+# Cambios v3: schedule_interval semanal (lunes) -> diario 6am
+#             SP migrado de TRUNCATE+INSERT a CDC idempotente
+#             4 pasos: INSERT nuevos / UPDATE columnas / UPDATE Oportunidad / DELETE inactivos
+#             Migrado tblJobsRegistros -> etl_audit_log
+#             Agregadas columnas Create_At y Update_At a tblActivosRedeemCorp
 # Cambios v2: MySqlOperator -> PythonOperator
 #             Agrega email_notifier + audit_logger
 #             Consistente con patron del resto de DAGs
@@ -65,11 +70,11 @@ def generar_log_y_notificar():
 # ── DAG ─────────────────────────────────────────────────
 with DAG(
     dag_id            = DAG_ID,
-    description       = "Recarga semanal de tblActivosRedeemCorp — activos con historia",
-    schedule_interval = "0 6 * * 1",    # ← cada lunes 6:00am Cancun
-    start_date        = datetime(2026, 6, 26),
+    description       = "CDC diario de tblActivosRedeemCorp — 4 pasos idempotente (INSERT/UPDATE/UPDATE Oportunidad/DELETE)",
+    schedule_interval = "0 6 * * *",     # <- cada dia 6:00am Cancun (antes solo lunes)
+    start_date        = datetime(2026, 9, 14),
     catchup           = False,
-    tags              = ["flybackDW", "semanal", "activos", "mariadb"],
+    tags              = ["flybackDW", "diario", "activos", "cdc", "mariadb"],
 ) as dag:
 
     ejecutar = PythonOperator(
