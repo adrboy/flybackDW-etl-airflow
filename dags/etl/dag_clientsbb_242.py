@@ -3,9 +3,9 @@
 # Objetivo: ETL clientes BB desde MariaDB 242 → SQL Server
 # Carpeta: etl/
 # Versión: 3.0 — 2026-08-24
-#   - Integración error_classifier — reporte estructurado
-#   - Log .txt y email automático SUCCESS/FAILED
-#   - Referencia Airflow automática en reporte de error
+# DESACTIVADO — 2026-09-17
+# Motivo  : RAW layer v2 — reemplazado por dag_raw_clients_cdc_diario
+# Pendiente: Reutilizar para Silver quincenal RAW → SQL Server
 # ═══════════════════════════════════════════════════════
 from airflow import DAG
 from airflow.operators.python import PythonOperator
@@ -20,14 +20,12 @@ from common.db_connections import (
   , LOG_PATH
 )
 
-# ── Configuración ────────────────────────────────────────
 DAG_ID        = "dag_clientsbb_242"
 VISTA_ORIGEN  = "db_general.viewclientsbb"
 TABLA_DESTINO = "source.clientsbb"
 SQL_SELECT    = "sql/clients/select_clientsbb_242.sql"
 SQL_INSERT    = "sql/clients/insert_clientsbb_242.sql"
 
-# ── Función ETL ──────────────────────────────────────────
 def etl_clientsbb(**context):
     fecha_inicio  = datetime.now()
     max_id        = 0
@@ -35,10 +33,8 @@ def etl_clientsbb(**context):
     estado        = "ERROR"
     mensaje_error = None
     reporte       = ""
-
     try:
         max_id = get_max_id(MSSQL_CONN_ID, TABLA_DESTINO)
-
         filas, reporte = ejecutar_insert(
             dag_id          = DAG_ID
           , mariadb_conn_id = ORIGEN_CONN_ID_242
@@ -51,11 +47,9 @@ def etl_clientsbb(**context):
           , airflow_context = context
         )
         estado = "SUCCESS"
-
     except Exception as e:
         mensaje_error = str(e)
         raise
-
     finally:
         try:
             registrar_log(
@@ -81,15 +75,13 @@ def etl_clientsbb(**context):
         except Exception as log_error:
             print(f"WARNING: Log falló: {str(log_error)}")
 
-# ── DAG ───────────────────────────────────────────────────
 with DAG(
     dag_id            = DAG_ID
   , start_date        = datetime(2026, 1, 1)
-  , schedule_interval = None
+  , schedule_interval = None   # ← DESACTIVADO
   , catchup           = False
-  , tags              = ["bronze", "242", "clientsbb"]
+  , tags              = ["bronze", "242", "clientsbb", "desactivado"]
 ) as dag:
-
     tarea_etl = PythonOperator(
         task_id         = "etl_clientsbb"
       , python_callable = etl_clientsbb
