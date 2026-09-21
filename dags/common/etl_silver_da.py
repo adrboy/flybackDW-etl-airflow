@@ -4,7 +4,9 @@
 # Objetivo: Proveer conexiones, watermarks y ejecución
 #           INSERT/UPDATE Silver para clientes
 # Carpeta : common/
-# Versión : 1.0 — 2026-09-19
+# Versión : 1.1 — 2026-09-21
+#   v1.0: fb solamente
+#   v1.1: agregado bb y ml (instancia 242)
 # ═══════════════════════════════════════════════════════
 import time
 import pyodbc
@@ -34,7 +36,25 @@ _SQL = {
       , 'mariadb_conn'  : ORIGEN_CONN_ID_242
       , 'raw_tabla'     : 'db_general.tbl_raw_clientsfb'
     }
-    # ── Aquí se agregan bb, ml, fi, vc en el futuro ──────
+  , 'bb': {
+        'select_insert' : 'sql/clients/select_silver_clientsbb_insert.sql'
+      , 'select_update' : 'sql/clients/select_silver_clientsbb_update.sql'
+      , 'insert'        : 'sql/clients/insert_silver_clientsbb.sql'
+      , 'update'        : 'sql/clients/update_silver_clientsbb.sql'
+      , 'tabla_destino' : 'source.clientsbb'
+      , 'mariadb_conn'  : ORIGEN_CONN_ID_242
+      , 'raw_tabla'     : 'db_general.tbl_raw_clientsbb'
+    }
+  , 'ml': {
+        'select_insert' : 'sql/clients/select_silver_clientsml_insert.sql'
+      , 'select_update' : 'sql/clients/select_silver_clientsml_update.sql'
+      , 'insert'        : 'sql/clients/insert_silver_clientsml.sql'
+      , 'update'        : 'sql/clients/update_silver_clientsml.sql'
+      , 'tabla_destino' : 'source.clientsml'
+      , 'mariadb_conn'  : ORIGEN_CONN_ID_242
+      , 'raw_tabla'     : 'db_general.tbl_raw_clientsml'
+    }
+    # ── fi, vc (instancia 240) se agregan aquí después ───
 }
 
 # ── Mapa de log por instancia ────────────────────────────
@@ -145,11 +165,10 @@ def detectar_modo(tabla_destino: str, conn_id: str, raw_tabla: str) -> str:
     max_dest = get_max_updatedat_destino(tabla_destino)
     min_raw  = get_min_updatedat_raw(conn_id, raw_tabla)
 
-    # Normalizar a datetime para comparar
-    if hasattr(max_dest, 'date'):
-        max_dest = max_dest.replace(tzinfo=None) if hasattr(max_dest, 'tzinfo') else max_dest
-    if hasattr(min_raw, 'date'):
-        min_raw = min_raw.replace(tzinfo=None) if hasattr(min_raw, 'tzinfo') else min_raw
+    if hasattr(max_dest, 'tzinfo') and max_dest.tzinfo:
+        max_dest = max_dest.replace(tzinfo=None)
+    if hasattr(min_raw, 'tzinfo') and min_raw.tzinfo:
+        min_raw = min_raw.replace(tzinfo=None)
 
     modo = 'full' if max_dest < min_raw else 'incremental'
     print(f"[Silver] max_dest={max_dest} | min_raw={min_raw} | modo={modo}")
@@ -182,8 +201,8 @@ def ejecutar_insert_silver(fuente: str, dag_id: str) -> tuple:
         conn_origen  = _get_mariadb_conn(cfg['mariadb_conn'])
         conn_destino = _get_pyodbc_conn()
 
-        cursor_origen          = conn_origen.cursor()
-        cursor_destino         = conn_destino.cursor()
+        cursor_origen                   = conn_origen.cursor()
+        cursor_destino                  = conn_destino.cursor()
         cursor_destino.fast_executemany = True
 
         cursor_origen.execute(query_select)
@@ -223,37 +242,35 @@ def ejecutar_update_silver(fuente: str, dag_id: str) -> tuple:
     Detecta automáticamente modo full o incremental.
     NO maneja errores — lanza excepción si falla.
 
-    MODO FULL        : clientid <= max_id, sin filtro fecha
+    MODO FULL        : updatedAt > '2000-01-01' → trae todos
                        → primera vez o reset de tabla
-    MODO INCREMENTAL : clientid <= max_id AND updatedAt > max_updatedAt_destino
+    MODO INCREMENTAL : updatedAt > max_updatedAt_destino
                        → solo los cambiados desde última carga
 
     Returns:
         (filas_actualizadas, reporte, modo)
     """
-    cfg             = _SQL[fuente]
-    max_id          = get_max_id_destino(cfg['tabla_destino'])
-    max_updatedat   = get_max_updatedat_destino(cfg['tabla_destino'])
-    modo            = detectar_modo(
-                          cfg['tabla_destino']
-                        , cfg['mariadb_conn']
-                        , cfg['raw_tabla']
-                      )
+    cfg           = _SQL[fuente]
+    max_id        = get_max_id_destino(cfg['tabla_destino'])
+    max_updatedat = get_max_updatedat_destino(cfg['tabla_destino'])
+    modo          = detectar_modo(
+                        cfg['tabla_destino']
+                      , cfg['mariadb_conn']
+                      , cfg['raw_tabla']
+                    )
 
     conn_origen  = None
     conn_destino = None
     filas        = 0
     inicio       = time.time()
 
-    # ── Modo full: sin filtro de fecha ───────────────────
     if modo == 'full':
         query_select = cargar_sql(
             cfg['select_update']
-          , max_id       = max_id
-          , max_updatedat = "'2000-01-01'"   # ← trae todos
+          , max_id        = max_id
+          , max_updatedat = "'2000-01-01'"
         )
     else:
-        # ── Modo incremental: solo los cambiados ─────────
         query_select = cargar_sql(
             cfg['select_update']
           , max_id        = max_id
@@ -266,8 +283,8 @@ def ejecutar_update_silver(fuente: str, dag_id: str) -> tuple:
         conn_origen  = _get_mariadb_conn(cfg['mariadb_conn'])
         conn_destino = _get_pyodbc_conn()
 
-        cursor_origen          = conn_origen.cursor()
-        cursor_destino         = conn_destino.cursor()
+        cursor_origen                   = conn_origen.cursor()
+        cursor_destino                  = conn_destino.cursor()
         cursor_destino.fast_executemany = True
 
         cursor_origen.execute(query_select)
@@ -277,17 +294,8 @@ def ejecutar_update_silver(fuente: str, dag_id: str) -> tuple:
             if not lote:
                 break
 
-            # ── Reordenar columnas para UPDATE ───────────
-            # SELECT devuelve: productid, contractid, clientid, email...
-            # UPDATE necesita: SET productid=?, contractid=?, email=?...
-            #                  WHERE clientid=?  ← clientid va al final
             lote_update = []
             for fila in lote:
-                # fila: (productid, contractid, clientid, email, capdata,
-                #        FirstName, LastName, countrycode, country, Estate,
-                #        ciudad, address, zip, corpcode, corp,
-                #        ingreso, egreso, rank, EstatusN, EstatusL,
-                #        createdAt, updatedAt, deletedAt)
                 lote_update.append((
                     fila[0]   # productid
                   , fila[1]   # contractid
