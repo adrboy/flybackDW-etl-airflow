@@ -4,9 +4,10 @@
 # Objetivo: Proveer conexiones, watermarks y ejecución
 #           INSERT/UPDATE Silver para clientes
 # Carpeta : common/
-# Versión : 1.1 — 2026-09-21
+# Versión : 1.2 — 2026-09-22
 #   v1.0: fb solamente
 #   v1.1: agregado bb y ml (instancia 242)
+#   v1.2: agregado fi y vc (instancia 240)
 # ═══════════════════════════════════════════════════════
 import time
 import pyodbc
@@ -20,7 +21,7 @@ from common.db_connections import (
   , MSSQL_CONN_ID
   , LOG_PATH
 )
-from common.sql_loader     import cargar_sql
+from common.sql_loader       import cargar_sql
 from common.error_classifier import generar_reporte_error, generar_reporte_success
 
 BATCH_SIZE = 1000
@@ -54,7 +55,24 @@ _SQL = {
       , 'mariadb_conn'  : ORIGEN_CONN_ID_242
       , 'raw_tabla'     : 'db_general.tbl_raw_clientsml'
     }
-    # ── fi, vc (instancia 240) se agregan aquí después ───
+  , 'fi': {
+        'select_insert' : 'sql/clients/select_silver_clientsfi_insert.sql'
+      , 'select_update' : 'sql/clients/select_silver_clientsfi_update.sql'
+      , 'insert'        : 'sql/clients/insert_silver_clientsfi.sql'
+      , 'update'        : 'sql/clients/update_silver_clientsfi.sql'
+      , 'tabla_destino' : 'source.clientsfi'
+      , 'mariadb_conn'  : ORIGEN_CONN_ID_240
+      , 'raw_tabla'     : 'db_general.tbl_raw_clientsfi'
+    }
+  , 'vc': {
+        'select_insert' : 'sql/clients/select_silver_clientsvc_insert.sql'
+      , 'select_update' : 'sql/clients/select_silver_clientsvc_update.sql'
+      , 'insert'        : 'sql/clients/insert_silver_clientsvc.sql'
+      , 'update'        : 'sql/clients/update_silver_clientsvc.sql'
+      , 'tabla_destino' : 'source.clientsvc'
+      , 'mariadb_conn'  : ORIGEN_CONN_ID_240
+      , 'raw_tabla'     : 'db_general.tbl_raw_clientsvc'
+    }
 }
 
 # ── Mapa de log por instancia ────────────────────────────
@@ -120,13 +138,19 @@ def get_max_id_destino(tabla_destino: str) -> int:
 
 
 def get_max_updatedat_destino(tabla_destino: str) -> datetime:
-    """MAX(updatedAt) en SQL Server destino."""
+    """
+    MAX(updatedAt) en SQL Server destino.
+    Maneja NULL devolviendo datetime(2000,1,1) como fecha mínima.
+    """
     conn = None
     try:
         conn   = _get_pyodbc_conn()
         cursor = conn.cursor()
-        cursor.execute(f"SELECT ISNULL(MAX(updatedAt), '2000-01-01') FROM {tabla_destino}")
-        return cursor.fetchone()[0]
+        cursor.execute(
+            f"SELECT ISNULL(MAX(updatedAt), '2000-01-01') FROM {tabla_destino}"
+        )
+        resultado = cursor.fetchone()[0]
+        return resultado if resultado else datetime(2000, 1, 1)
     finally:
         if conn: conn.close()
 

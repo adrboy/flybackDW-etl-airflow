@@ -4,20 +4,23 @@
 # Objetivo: INSERT + UPDATE Silver de clientes
 #           RAW MariaDB → source SQL Server
 #           Días 1 y 15 de cada mes a las 6am
-#           Todas las fuentes en PARALELO
+#           Las 5 fuentes en PARALELO
 # Carpeta : etl/
-# Versión : 1.1 — 2026-09-21
+# Versión : 1.2 — 2026-09-22
 #   v1.0: solo fb
-#   v1.1: fb + bb + ml en paralelo; soporte ejecución manual PowerShell
+#   v1.1: fb + bb + ml en paralelo
+#   v1.2: fb + bb + ml + fi + vc — las 5 fuentes completas
 #
-# ── Ejecución manual desde PowerShell ───────────────────
+# ── Ejecución manual desde bash Docker ──────────────────
 # Todas las fuentes:
-#   docker exec -it airflow_scheduler airflow dags trigger dag_silver_clients_quincenal
+#   airflow dags trigger dag_silver_clients_quincenal
 #
 # Una fuente específica:
-#   docker exec -it airflow_scheduler airflow dags trigger dag_silver_clients_quincenal --conf '{"fuente":"fb"}'
-#   docker exec -it airflow_scheduler airflow dags trigger dag_silver_clients_quincenal --conf '{"fuente":"bb"}'
-#   docker exec -it airflow_scheduler airflow dags trigger dag_silver_clients_quincenal --conf '{"fuente":"ml"}'
+#   airflow dags trigger dag_silver_clients_quincenal --conf '{"fuente":"fb"}'
+#   airflow dags trigger dag_silver_clients_quincenal --conf '{"fuente":"bb"}'
+#   airflow dags trigger dag_silver_clients_quincenal --conf '{"fuente":"ml"}'
+#   airflow dags trigger dag_silver_clients_quincenal --conf '{"fuente":"fi"}'
+#   airflow dags trigger dag_silver_clients_quincenal --conf '{"fuente":"vc"}'
 # ═══════════════════════════════════════════════════════
 import sys
 sys.path.insert(0, '/opt/airflow/dags')
@@ -32,40 +35,57 @@ DAG_ID = 'dag_silver_clients_quincenal'
 
 
 # ════════════════════════════════════════════════════════
-# Wrappers para PythonOperator — uno por fuente
+# Wrappers — uno por fuente
 # ════════════════════════════════════════════════════════
 
 def task_silver_fb(**context):
-    """Silver fb — source.clientsfb"""
+    """Silver fb — source.clientsfb (instancia 242)"""
     fuente = context.get('dag_run').conf.get('fuente', None)
     if fuente and fuente != 'fb':
-        print(f"[{datetime.now()}] Fuente {fuente} solicitada — saltando fb")
+        print(f"Fuente {fuente} solicitada — saltando fb")
         return
-    resultado = orquestar_silver('fb')
-    if not resultado:
+    if not orquestar_silver('fb'):
         raise Exception('Silver FB falló — revisar log.')
 
 
 def task_silver_bb(**context):
-    """Silver bb — source.clientsbb"""
+    """Silver bb — source.clientsbb (instancia 242)"""
     fuente = context.get('dag_run').conf.get('fuente', None)
     if fuente and fuente != 'bb':
-        print(f"[{datetime.now()}] Fuente {fuente} solicitada — saltando bb")
+        print(f"Fuente {fuente} solicitada — saltando bb")
         return
-    resultado = orquestar_silver('bb')
-    if not resultado:
+    if not orquestar_silver('bb'):
         raise Exception('Silver BB falló — revisar log.')
 
 
 def task_silver_ml(**context):
-    """Silver ml — source.clientsml"""
+    """Silver ml — source.clientsml (instancia 242)"""
     fuente = context.get('dag_run').conf.get('fuente', None)
     if fuente and fuente != 'ml':
-        print(f"[{datetime.now()}] Fuente {fuente} solicitada — saltando ml")
+        print(f"Fuente {fuente} solicitada — saltando ml")
         return
-    resultado = orquestar_silver('ml')
-    if not resultado:
+    if not orquestar_silver('ml'):
         raise Exception('Silver ML falló — revisar log.')
+
+
+def task_silver_fi(**context):
+    """Silver fi — source.clientsfi (instancia 240)"""
+    fuente = context.get('dag_run').conf.get('fuente', None)
+    if fuente and fuente != 'fi':
+        print(f"Fuente {fuente} solicitada — saltando fi")
+        return
+    if not orquestar_silver('fi'):
+        raise Exception('Silver FI falló — revisar log.')
+
+
+def task_silver_vc(**context):
+    """Silver vc — source.clientsvc (instancia 240)"""
+    fuente = context.get('dag_run').conf.get('fuente', None)
+    if fuente and fuente != 'vc':
+        print(f"Fuente {fuente} solicitada — saltando vc")
+        return
+    if not orquestar_silver('vc'):
+        raise Exception('Silver VC falló — revisar log.')
 
 
 # ════════════════════════════════════════════════════════
@@ -74,15 +94,14 @@ def task_silver_ml(**context):
 
 with DAG(
     dag_id            = DAG_ID
-  , description       = 'Silver quincenal RAW → SQL Server — fb/bb/ml en paralelo (días 1 y 15, 6am)'
+  , description       = 'Silver quincenal RAW → SQL Server — 5 fuentes en paralelo (días 1 y 15, 6am)'
   , schedule_interval = '0 6 1,15 * *'
   , start_date        = datetime(2026, 9, 19)
   , catchup           = False
   , tags              = ['silver', 'quincenal', 'clientes']
-  , params            = {'fuente': None}   # ← parámetro para ejecución manual
+  , params            = {'fuente': None}
 ) as dag:
 
-    # ── Tasks en PARALELO ────────────────────────────────
     tarea_fb = PythonOperator(
         task_id         = 'silver_fb'
       , python_callable = task_silver_fb
@@ -107,10 +126,28 @@ with DAG(
       , retry_delay     = 300
     )
 
-    # ── PARALELO — sin dependencia entre fuentes ─────────
+    tarea_fi = PythonOperator(
+        task_id         = 'silver_fi'
+      , python_callable = task_silver_fi
+      , provide_context = True
+      , retries         = 1
+      , retry_delay     = 300
+    )
+
+    tarea_vc = PythonOperator(
+        task_id         = 'silver_vc'
+      , python_callable = task_silver_vc
+      , provide_context = True
+      , retries         = 1
+      , retry_delay     = 300
+    )
+
+    # ── 5 tasks PARALELAS — sin dependencia entre fuentes ─
     #
     #  silver_fb ──┐
-    #  silver_bb ──┼──► (fin — cada una reporta independiente)
-    #  silver_ml ──┘
+    #  silver_bb ──┤
+    #  silver_ml ──┼──► (fin — cada una reporta independiente)
+    #  silver_fi ──┤
+    #  silver_vc ──┘
     #
-    [tarea_fb, tarea_bb, tarea_ml]
+    [tarea_fb, tarea_bb, tarea_ml, tarea_fi, tarea_vc]
