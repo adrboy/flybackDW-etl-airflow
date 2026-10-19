@@ -28,6 +28,7 @@ BEGIN
              , mensaje_error = v_error
              , fecha_fin     = NOW()
         WHERE  id = v_audit_id;
+        RESIGNAL;   -- relanza el error original: el DAG lo ve como fallo
     END;
 
     -- ── Registro RUNNING ─────────────────────────────────
@@ -57,6 +58,7 @@ BEGIN
     -- o ya no tiene crédito activo en credits
     UPDATE db_general.tbl_raw_clientsfi  raw
     SET    raw.deletedAt = NOW()
+         , raw.updatedAt = NOW()   -- el borrado cuenta como cambio: el Silver incremental lo recoge
     WHERE  raw.deletedAt IS NULL
       AND  NOT EXISTS (
                SELECT 1

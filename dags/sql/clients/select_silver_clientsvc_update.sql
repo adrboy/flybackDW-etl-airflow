@@ -61,6 +61,6 @@ SELECT
     , raw.updatedAt                                      AS updatedAt
     , raw.deletedAt                                      AS deletedAt
 FROM   db_general.tbl_raw_clientsvc  raw
-WHERE  raw.deletedAt IS NULL
-  AND  raw.tradedid  <= {max_id}
+-- Borrado logico RAW: el SP de borrado marca deletedAt y updatedAt; este filtro lo recoge por updatedAt
+WHERE  raw.tradedid  <= {max_id}
   AND  raw.updatedAt >  {max_updatedat}

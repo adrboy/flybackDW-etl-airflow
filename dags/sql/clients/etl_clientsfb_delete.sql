@@ -30,6 +30,7 @@ BEGIN
              , mensaje_error = v_error
              , fecha_fin     = NOW()
         WHERE  id = v_audit_id;
+        RESIGNAL;   -- relanza el error original: el DAG lo ve como fallo
     END;
 
     -- ════════════════════════════════════════════════════
@@ -62,6 +63,7 @@ BEGIN
     -- ════════════════════════════════════════════════════
     UPDATE db_general.tbl_raw_clientsfb  raw
     SET    raw.deletedAt = NOW()
+         , raw.updatedAt = NOW()   -- el borrado cuenta como cambio: el Silver incremental lo recoge
     WHERE  raw.deletedAt IS NULL
       AND  NOT EXISTS (
                SELECT 1

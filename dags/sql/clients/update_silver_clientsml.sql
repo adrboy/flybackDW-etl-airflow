@@ -25,5 +25,5 @@ SET    productid   = ?
      , EstatusN    = ?
      , EstatusL    = ?
      , updatedAt   = ?
-     , deletedAt   = ?
+     , deletedAt   = COALESCE(?, deletedAt)
 WHERE  clientid    = ?
