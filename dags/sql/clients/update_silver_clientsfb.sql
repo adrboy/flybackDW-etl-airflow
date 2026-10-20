@@ -25,5 +25,5 @@ SET    productid   = ?
      , EstatusN    = ?
      , EstatusL    = ?
      , updatedAt   = ?
-     , deletedAt   = COALESCE(?, deletedAt)
+     , deletedAt   = COALESCE(CAST(? AS datetime2(7)), deletedAt)
 WHERE  clientid    = ?
