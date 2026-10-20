@@ -214,6 +214,113 @@ dags/
 
 ---
 
+## Estructura y características de la programación de las extracciones (RAW — CDC diario)
+
+> **Alcance:** DAG `dag_raw_clients_cdc_diario` — extracción incremental de clientes desde los orígenes on-premises hacia RAW (MariaDB `db_general`).
+> **Documentado:** 2026-10-20. Silver (SQL Server) y Gold no se describen aquí.
+
+### ¿Qué tiene la programación?
+
+**Piezas: tres capas de código y los SP**
+
+| Capa | Archivo | Responsabilidad |
+|---|---|---|
+| DAG | `dags/etl/dag_raw_clients_cdc_diario.py` | Horario, tareas y reintentos. Solo orquesta |
+| Negocio | `dags/etl/etl_raw_ne.py` (`orquestar`) | Recorre los SP de una instancia, captura errores, escribe auditoría, TXT y correo |
+| Datos | `dags/common/etl_raw_da.py` | Lista de SP por instancia, conexiones, `ejecutar_sp` y `registrar_log` |
+| SP | MariaDB `db_general.etl_clients*` | Hace el CDC: INSERT de nuevos + UPDATE de modificados |
+
+La lógica del CDC vive en los SP. Python solo hace el `CALL` de cada uno.
+
+**Flujo**
+
+```
+08:00 y 18:00 (cada día)
+        │
+        ▼
+dag_raw_clients_cdc_diario
+   ├─► cdc_instancia_242 ─► etl_clientsfb ─► etl_clientsbb ─► etl_clientsml
+   │        (las dos instancias corren en paralelo, sin dependencia entre ellas)
+   └─► cdc_instancia_240 ─► etl_clientsfi ─► etl_clientsvc
+
+   Por cada instancia, al terminar: auditoría en BD + reporte TXT + correo
+```
+
+**Características**
+
+- **Paralelismo:** dos tareas independientes, una por instancia MariaDB, que corren a la vez.
+- **Secuencia interna:** dentro de cada instancia los SP corren uno tras otro, así que hay una carga a la vez por servidor.
+- **Aislamiento de fallos:** si un SP falla, los siguientes igual se ejecutan. La tarea falla al final si alguno falló.
+- **Reintentos:** 2, con 60 s de espera. Un reintento repite todos los SP de la instancia, y son idempotentes.
+- **`catchup = False`:** si Airflow estuvo apagado, solo se ejecuta la última corrida perdida.
+- **Lógica incremental:** el INSERT toma solo claves mayores al máximo de RAW, y el UPDATE solo toca filas cuyas columnas cambiaron.
+- **`updatedAt`:** en fb, bb y ml se actualiza solo (`ON UPDATE CURRENT_TIMESTAMP`), y eso permite a Silver detectar cambios.
+
+**Tipos de log**
+
+| Log | Dónde | Quién lo escribe | Contenido |
+|---|---|---|---|
+| Auditoría del SP | `db_general.etl_audit_log`, `paquete` = nombre del SP | El propio SP | `RUNNING` → `OK` o `ERROR`, filas y mensaje de error |
+| Auditoría del DAG | Misma tabla, `paquete` = `dag_raw_clients_cdc_diario`, `tipo_ejecucion` = `DIARIO-CDC` | `registrar_log` (Python) | Una fila por SP: `OK` si la llamada no lanzó excepción |
+| Reporte TXT | `logs/etl_raw_clients_{instancia}_FB_log_{AAAAMMDDHHMMSS}.txt` | `orquestar` | Resultado por SP de la instancia |
+| Correo | SMTP corporativo | `send_etl_notification` | Un correo por instancia y por corrida |
+| Log de tarea | UI de Airflow y `logs/dag_id=...` | Airflow | Salida estándar y traceback |
+
+El `FB` del nombre del TXT es un sufijo fijo, no indica la fuente.
+
+### ¿Para qué se usa este tipo de programación?
+
+**Propósito:** mantener RAW al día con los cambios del origen, dos veces al día y sin recargar todo, dejando evidencia verificable de cada ejecución. RAW es la base sobre la que leen Silver y Gold.
+
+**Por qué está hecha así**
+
+- **El CDC en SP:** la lógica corre junto a los datos y se puede probar o repetir a mano con un `CALL`.
+- **Python solo orquesta:** separar DAG, negocio y datos permite cambiar horario, reintentos o avisos sin tocar la lógica de extracción.
+- **Una tarea por instancia:** los orígenes están en servidores distintos, así que una caída en uno no frena al otro y el tiempo total es el de la instancia más lenta.
+- **Un fallo no detiene al resto:** una fuente con problemas no bloquea a las demás.
+- **Idempotente:** repetir una corrida o reintentarla es seguro.
+- **Auditoría en tres niveles (BD, TXT y correo):** se puede saber qué pasó sin entrar al servidor.
+
+### ¿Cómo se ejecuta?
+
+- **Automática:** 08:00 y 18:00, hora `America/Cancun`.
+- **DAG manual:** desde la UI de Airflow (Trigger DAG) o, dentro del contenedor, `airflow dags trigger dag_raw_clients_cdc_diario`.
+- **Un SP a mano:** `CALL db_general.etl_clientsfb();` (fb, bb y ml en la 242; fi y vc en la 240).
+
+**Cómo verificar una corrida**
+
+1. Estado del DAG en Airflow.
+2. El TXT más reciente de cada instancia.
+3. `etl_audit_log`. El OK de un cliente SQL o del DAG no basta, porque los SP anotan sus errores en esa tabla.
+
+```sql
+SELECT id, paquete, tipo_ejecucion, estado, filas_insertadas, mensaje_error, fecha_inicio
+FROM   db_general.etl_audit_log
+WHERE  estado <> 'OK'
+ORDER BY id DESC
+LIMIT 20;
+```
+
+Una consulta vacía significa que ninguna ejecución registró error. Se corre en las dos instancias, 242 y 240.
+
+### Estado de la implementación (2026-10-20)
+
+| Tema | Estado |
+|---|---|
+| `RESIGNAL` en el handler de los SP del CDC | Pendiente en los cinco. Archivo listo para fi: `dags/sql/clients/etl_clientsfi_cdc.sql` |
+| Límite de corridas simultáneas (`max_active_runs`) | No configurado. Falta decidir entre poner en cola o descartar |
+| Definiciones de los SP en el repo | Solo fi. fb, bb, ml y vc viven solo en MariaDB |
+
+**Limitaciones conocidas**
+
+- Mientras el `RESIGNAL` no esté desplegado, el DAG puede reportar OK con un SP fallido. Está demostrado con fi el 2026-10-12: error registrado en `etl_audit_log` y TXT con ✅.
+- Sin límite de corridas simultáneas. El 2026-10-08 y el 2026-10-12 hubo dos corridas a segundos de diferencia, y coincidieron con errores `Duplicate entry` en la llave de `tbl_raw_clientsfi`.
+- Existe una fila `RUNNING` huérfana del 2026-09-24 en la 240. No afecta la operación.
+
+Fuera de alcance de esta sección: `dag_raw_clients_delete_mensual` (día 3, 03:00) y `dag_silver_clients_quincenal` (días 1 y 15, 06:00).
+
+---
+
 ## Conexiones Airflow
 
 | ID | Tipo | Servidor |

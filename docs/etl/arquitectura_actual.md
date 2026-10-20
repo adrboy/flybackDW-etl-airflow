@@ -21,31 +21,48 @@ La base arquitectonica es adecuada para una migracion incremental desde SSIS: se
 
 ## 2. Vista de arquitectura
 
-```text
-Usuario / Operacion
-        |
-        v
-Airflow UI :8085
-        |
-        v
-airflow-webserver + airflow-scheduler
-        |
-        +-- Metadata Airflow --> postgres:13
-        |
-        +-- DAGs Python --> ./dags
-        |
-        +-- Logs --> ./logs
-        |
-        +-- Plugins --> ./plugins
-        |
-        +-- Data lake local --> ./data_lake
-        |
-        +-- Origenes MariaDB --> MariaDB 240 / MariaDB 242
-        |
-        +-- Destino DW --> SQL Server 244
-        |
-        +-- Email SMTP --> mail.gusacapital.com:587
+```mermaid
+flowchart LR
+    Airflow["Apache Airflow<br/>Webserver + Scheduler<br/>Docker"]
+
+    subgraph Diario["Ejecucion diaria"]
+        CDC["Sincronizacion CDC<br/>RAW de clientes"]
+    end
+
+    subgraph MariaDB["MariaDB on-premises"]
+        M240[("MariaDB 240")]
+        M242[("MariaDB 242")]
+        RAW[("Base de datos RAW")]
+        Bronze[("Base de datos Bronze<br/>separada de RAW")]
+        M240 --> CDC
+        M242 --> CDC
+        CDC --> RAW
+        RAW --> Bronze
+    end
+
+    subgraph Mensual["Ejecucion mensual"]
+        Silver["Transformacion Silver"]
+        Gold["Procesamiento Gold<br/>Stored procedures"]
+        Silver --> Gold
+    end
+
+    SQLServer[("SQL Server 244<br/>Silver / Gold")]
+    Postgres[("PostgreSQL 13<br/>metadatos de Airflow")]
+    Logs["Logs y auditoria"]
+
+    Airflow -. "orquesta" .-> CDC
+    Airflow -. "orquesta" .-> Silver
+    Airflow -. "orquesta" .-> Gold
+    Airflow --> Postgres
+    Bronze --> Silver
+    Silver --> SQLServer
+    Gold --> SQLServer
+    CDC -.-> Logs
+    Silver -.-> Logs
+    Gold -.-> Logs
 ```
+
+RAW se actualiza diariamente en MariaDB; Bronze reside en una base de datos MariaDB separada. Silver y Gold se procesan en SQL Server 244 durante el ciclo mensual. Airflow orquesta ambos ciclos de forma independiente. En la configuracion actual, el DAG Silver corre quincenalmente (dias 1 y 15) y Gold mensualmente; el diagrama representa el ciclo funcional mensual.
 
 ## 3. Componentes principales
 
