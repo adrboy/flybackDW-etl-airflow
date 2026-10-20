@@ -56,6 +56,7 @@ with DAG(
   , schedule_interval = '0 8,18 * * *'   # ← 8am y 6pm todos los días
   , start_date        = datetime(2026, 9, 17)
   , catchup           = False
+  , max_active_runs   = 1              # una sola corrida activa; un disparo extra queda en cola (queued)
   , tags              = ['raw', 'cdc', 'diario', 'clientes']
 ) as dag:
 

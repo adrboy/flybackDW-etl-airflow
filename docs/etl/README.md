@@ -252,6 +252,7 @@ dag_raw_clients_cdc_diario
 - **Secuencia interna:** dentro de cada instancia los SP corren uno tras otro, así que hay una carga a la vez por servidor.
 - **Aislamiento de fallos:** si un SP falla, los siguientes igual se ejecutan. La tarea falla al final si alguno falló.
 - **Reintentos:** 2, con 60 s de espera. Un reintento repite todos los SP de la instancia, y son idempotentes.
+- **Una sola corrida activa:** `max_active_runs = 1`. Un disparo extra no corre en paralelo: queda en cola (`queued`) y se ejecuta cuando termina el anterior.
 - **`catchup = False`:** si Airflow estuvo apagado, solo se ejecuta la última corrida perdida.
 - **Lógica incremental:** el INSERT toma solo claves mayores al máximo de RAW, y el UPDATE solo toca filas cuyas columnas cambiaron.
 - **`updatedAt`:** en fb, bb y ml se actualiza solo (`ON UPDATE CURRENT_TIMESTAMP`), y eso permite a Silver detectar cambios.
@@ -260,8 +261,8 @@ dag_raw_clients_cdc_diario
 
 | Log | Dónde | Quién lo escribe | Contenido |
 |---|---|---|---|
-| Auditoría del SP | `db_general.etl_audit_log`, `paquete` = nombre del SP | El propio SP | `RUNNING` → `OK` o `ERROR`, filas y mensaje de error |
-| Auditoría del DAG | Misma tabla, `paquete` = `dag_raw_clients_cdc_diario`, `tipo_ejecucion` = `DIARIO-CDC` | `registrar_log` (Python) | Una fila por SP: `OK` si la llamada no lanzó excepción |
+| Auditoría del SP | `db_general.etl_audit_log` (los cinco; fb, bb y ml desde su v1.1, desplegada el 2026-10-20). El histórico de fb, bb y ml anterior a la v1.1 está en `flybackDW.etl_audit_log`. `paquete` = nombre del SP | El propio SP | `RUNNING` → `OK` o `ERROR`, filas y mensaje de error |
+| Auditoría del DAG | `db_general.etl_audit_log` en las dos instancias, `paquete` = `dag_raw_clients_cdc_diario`, `tipo_ejecucion` = `DIARIO-CDC` | `registrar_log` (Python) | Una fila por SP: `OK` si la llamada no lanzó excepción |
 | Reporte TXT | `logs/etl_raw_clients_{instancia}_FB_log_{AAAAMMDDHHMMSS}.txt` | `orquestar` | Resultado por SP de la instancia |
 | Correo | SMTP corporativo | `send_etl_notification` | Un correo por instancia y por corrida |
 | Log de tarea | UI de Airflow y `logs/dag_id=...` | Airflow | Salida estándar y traceback |
@@ -301,21 +302,133 @@ ORDER BY id DESC
 LIMIT 20;
 ```
 
-Una consulta vacía significa que ninguna ejecución registró error. Se corre en las dos instancias, 242 y 240.
+Una consulta vacía significa que ninguna ejecución registró error. Se corre en la 240 y en la 242. Para el histórico de fb, bb y ml anterior a la v1.1, consulta también `flybackDW.etl_audit_log` con `AND paquete LIKE 'etl_clients%'` y `estado NOT IN ('OK', 'SUCCESS')`: ahí quedaron los errores del 2026-10-05 y 2026-10-12.
+
+### Candado `GET_LOCK` en los SP del CDC
+
+**¿Qué es?** Cada SP del CDC pide, al empezar, un candado con nombre en MariaDB (`GET_LOCK`) y lo suelta al terminar. Mientras alguien lo tiene, cualquier otra ejecución del mismo SP espera. Funciona como un semáforo: **una sola ejecución a la vez de cada SP**.
+
+**¿Por qué existe?** Antes de la v1.1, dos ejecuciones solapadas leían el mismo `MAX(clave)` de RAW e intentaban insertar los mismos clientes nuevos. Una ganaba y la otra fallaba con `Duplicate entry` en la llave primaria. Quedó registrado en fi (2026-10-08 y 2026-10-12) y en fb (2026-10-05 y 2026-10-12). Los TXT del 8 y del 12 de octubre muestran dos corridas del DAG a segundos de diferencia; que el solape fue la causa se infiere, no se probó directamente.
+
+**¿Para qué sirve?**
+
+- Evita el `Duplicate entry` cuando dos ejecuciones coinciden.
+- Cubre un `CALL` manual desde Navicat mientras el DAG corre, cosa que `max_active_runs = 1` no ve.
+
+**¿Cómo funciona?**
+
+```sql
+IF COALESCE(GET_LOCK('db_general.etl_clientsfi', 300), 0) <> 1 THEN
+    SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'etl_clientsfi sigue ocupado por otra ejecucion; reintentar';
+END IF;
+-- ... el trabajo del SP ...
+DO RELEASE_LOCK('db_general.etl_clientsfi');
+```
+
+- `GET_LOCK(nombre, 300)` devuelve 1 si lo obtiene, 0 si pasaron 300 s sin conseguirlo y NULL si hubo error. `COALESCE(..., 0)` trata el NULL como fallo.
+- El 300 es el **máximo** de espera, no un tiempo fijo: si el candado se libera a los 6 s, el SP continúa a los 6 s.
+- Se pide **antes** de leer `MAX(clave)` y de escribir en `etl_audit_log`, así la segunda ejecución ya ve lo que dejó la primera.
+- Se libera de tres formas: al terminar el SP (`DO RELEASE_LOCK`), en el handler de error antes del `RESIGNAL`, y automáticamente si la conexión se cierra (Python cierra la conexión en `ejecutar_sp`).
+- Los candados valen para todo el servidor MariaDB, no por esquema. Por eso el nombre lleva el prefijo `db_general.`:
+
+| SP | Candado | Instancia |
+|---|---|---|
+| `etl_clientsfb` | `db_general.etl_clientsfb` | 242 |
+| `etl_clientsbb` | `db_general.etl_clientsbb` | 242 |
+| `etl_clientsml` | `db_general.etl_clientsml` | 242 |
+| `etl_clientsfi` | `db_general.etl_clientsfi` | 240 |
+| `etl_clientsvc` | `db_general.etl_clientsvc` | 240 |
+
+**¿Qué pasa con la segunda ejecución?**
+
+| Situación | Resultado |
+|---|---|
+| La primera termina antes de 300 s | La segunda continúa, no encuentra nada nuevo (es idempotente) y termina `OK` con 0 filas |
+| La primera falló | La segunda hace el trabajo normal |
+| Pasan 300 s sin conseguir el candado | La segunda falla con `sigue ocupado por otra ejecucion; reintentar`. En el DAG la tarea reintenta a los 60 s (`retries = 2`). Falla antes de crear su fila de auditoría, así que no deja fila `ERROR` en `etl_audit_log` (sin probar) |
+
+**Dos capas distintas de espera**
+
+| Capa | Qué pasa con la segunda ejecución | Cómo se ve |
+|---|---|---|
+| DAG de Airflow | Espera en cola hasta que termine la primera (`max_active_runs = 1`) | Estado `queued` en la UI |
+| SP en MariaDB | Espera dentro de la base, bloqueada en `GET_LOCK` | La tarea sigue `running`, o el `CALL` de Navicat queda en «Procesando» |
+
+**Cómo operarlo**
+
+```sql
+-- ¿Quién tiene el candado? NULL = libre; un número = id de conexión de quien lo tiene
+SELECT IS_USED_LOCK('db_general.etl_clientsbb');
+
+-- Los cinco juntos (los de fb, bb y ml en la 242; los de fi y vc en la 240)
+SELECT IS_USED_LOCK('db_general.etl_clientsfb') AS fb
+     , IS_USED_LOCK('db_general.etl_clientsbb') AS bb
+     , IS_USED_LOCK('db_general.etl_clientsml') AS ml;
+SELECT IS_USED_LOCK('db_general.etl_clientsfi') AS fi
+     , IS_USED_LOCK('db_general.etl_clientsvc') AS vc;
+
+-- Soltarlo desde la sesión que lo tiene
+SELECT RELEASE_LOCK('db_general.etl_clientsbb');
+```
+
+**Cómo probarlo sin tocar producción.** Con un nombre inventado y dos pestañas distintas (comprobar que los dos `CONNECTION_ID()` son diferentes):
+
+```sql
+-- Pestaña A
+SELECT GET_LOCK('prueba_candado', 0);        -- 1
+-- Pestaña B: debe quedarse esperando
+SELECT GET_LOCK('prueba_candado', 60);       -- espera; devuelve 1 cuando A suelta, o 0 a los 60 s
+-- Pestaña A
+SELECT RELEASE_LOCK('prueba_candado');       -- 1
+```
+
+**Precauciones (observadas el 2026-10-20)**
+
+- **Probar siempre con un nombre inventado, nunca con el de un SP real.** En una prueba con el candado de bb, un `CALL` manual esperó 72 s y hubo que detenerlo.
+- Una misma sesión puede quedar con el candado tomado más de una vez: después de un `RELEASE_LOCK` con resultado 1, `IS_USED_LOCK` seguía mostrando a esa sesión. Si pasa, repetir `RELEASE_LOCK` hasta que dé `NULL`, o cerrar la conexión. La causa probable es que el candado se cuenta por cada toma; no se verificó. Cerrar la pestaña de Navicat puede no cerrar la conexión.
+- Antes de las 08:00 y las 18:00, `IS_USED_LOCK` de los cinco debe dar `NULL`. Un candado olvidado haría esperar 300 s al CDC, y la tarea fallaría.
+
+**Estado de la prueba**
+
+| Qué | Estado |
+|---|---|
+| El candado hace esperar a la segunda ejecución | Probado con un `CALL` real de bb: esperó 38 s y 72 s |
+| La espera continúa al soltarlo | Probado con un candado de prueba: devolvió 1 a los 6.6 s |
+| Vencimiento a los 300 s (`SIGNAL` y `RESIGNAL`) | Sin probar |
 
 ### Estado de la implementación (2026-10-20)
 
 | Tema | Estado |
 |---|---|
-| `RESIGNAL` en el handler de los SP del CDC | Pendiente en los cinco. Archivo listo para fi: `dags/sql/clients/etl_clientsfi_cdc.sql` |
-| Límite de corridas simultáneas (`max_active_runs`) | No configurado. Falta decidir entre poner en cola o descartar |
-| Definiciones de los SP en el repo | Solo fi. fb, bb, ml y vc viven solo en MariaDB |
+| `RESIGNAL` y candado `GET_LOCK` en los SP del CDC | Desplegados el 2026-10-20: fi (v1.2) y fb, bb, vc y ml (v1.1). Comparados contra el repo con `diff`, sin diferencias: fi, bb y vc. fb y ml verificados por palabras clave (`GET_LOCK` y `RESIGNAL` presentes). Archivos en `dags/sql/clients/sp/raw_bronce/etl_clients*_cdc.sql`. El candado hace que una segunda ejecución del mismo SP, incluso un `CALL` manual, espere hasta 300 s a que termine la primera |
+| Límite de corridas simultáneas (`max_active_runs`) | `max_active_runs = 1` desde 2026-10-20. Los disparos extra quedan en cola y se ejecutan después. Descartarlos en lugar de encolarlos queda como mejora pendiente |
+| Definiciones de los SP en el repo | CDC: los cinco, en `dags/sql/clients/sp/raw_bronce/`. Borrado: los cinco, en la misma carpeta |
 
 **Limitaciones conocidas**
 
-- Mientras el `RESIGNAL` no esté desplegado, el DAG puede reportar OK con un SP fallido. Está demostrado con fi el 2026-10-12: error registrado en `etl_audit_log` y TXT con ✅.
-- Sin límite de corridas simultáneas. El 2026-10-08 y el 2026-10-12 hubo dos corridas a segundos de diferencia, y coincidieron con errores `Duplicate entry` en la llave de `tbl_raw_clientsfi`.
+- Antes del 2026-10-20 el DAG podía reportar OK con un SP fallido. Está demostrado con fi el 2026-10-12: error registrado en `etl_audit_log` y TXT con ✅. fb registró errores `Duplicate entry` el 2026-10-05 y el 2026-10-12. Con los cinco SP en v1.1 o posterior el error se relanza y llega al DAG; falta verlo en una corrida real.
+- Un disparo extra se encola y repite el trabajo, aunque sea idempotente. Antes del 2026-10-20 no había límite: el 2026-10-08 y el 2026-10-12 hubo dos corridas a segundos de diferencia, y coincidieron con errores `Duplicate entry` en la llave de `tbl_raw_clientsfi`.
+- Si una corrida se queda colgada, las siguientes esperan en cola. No hay `dagrun_timeout` configurado.
 - Existe una fila `RUNNING` huérfana del 2026-09-24 en la 240. No afecta la operación.
+
+### Organización de `dags/sql/clients`
+
+Los archivos SQL se separan según quién los usa:
+
+```
+dags/sql/clients/
+├── (raíz)        SQL que carga Python con `sql_loader.cargar_sql`:
+│                  select_* / insert_* / update_* de Silver, get_max_id,
+│                  insert_audit_log_raw y exec_sp_* (EXEC de Gold que lanza Airflow)
+└── sp/            Definiciones de stored procedures (scripts de despliegue)
+    ├── raw_bronce/ SP de RAW en MariaDB: CDC (`etl_clientsXX_cdc.sql`) y borrado (`etl_clientsXX_delete.sql`)
+    ├── silver/    reservada para SP de Silver (vacía hoy)
+    └── gold/      reservada para SP de Gold en SQL Server (vacía hoy)
+```
+
+- **Python no carga nada de `sp/`.** Los SP se despliegan a mano (DROP + CREATE) y Python solo los llama por nombre con `CALL`.
+- **El archivo del repo es la versión vigente del SP**, aunque ningún DAG lo lea. Se despliega ejecutando el archivo, no editando el SP dentro de la base, para que repo y base no se desfasen.
 
 Fuera de alcance de esta sección: `dag_raw_clients_delete_mensual` (día 3, 03:00) y `dag_silver_clients_quincenal` (días 1 y 15, 06:00).
 

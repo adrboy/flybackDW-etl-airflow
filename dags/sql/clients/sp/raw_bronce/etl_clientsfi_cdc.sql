@@ -3,11 +3,14 @@
 -- Base      : db_general (instancia 240)
 -- Ejecucion : manual en Navicat sobre MXPDCPROD240
 --             (DROP + CREATE; MariaDB no tiene ALTER para el cuerpo)
--- Version   : 1.1 - 2026-10-20
+-- Version   : 1.2 - 2026-10-20
 --             1.1: el handler relanza el error (RESIGNAL) para que
 --                  Airflow lo vea como fallo. La 1.0 lo ocultaba:
 --                  el SP anotaba ERROR en etl_audit_log y el DAG
 --                  reportaba OK igual.
+--             1.2: candado GET_LOCK al inicio: una sola ejecucion a la vez
+--                  (espera hasta 300 s). Evita el Duplicate entry cuando dos
+--                  corridas, o un CALL manual, se solapan.
 -- ============================================================
 
 DROP PROCEDURE IF EXISTS `db_general`.`etl_clientsfi`;
@@ -23,7 +26,7 @@ BEGIN
 -- Destino : db_general.tbl_raw_clientsfi
 -- Log     : db_general.etl_audit_log
 -- Proceso : DIARIO — INSERT nuevos + UPDATE modificados
--- Versión : 1.1 — 2026-10-20
+-- Versión : 1.2 — 2026-10-20
 -- ============================================================
 
     -- ── Variables generales ──────────────────────────────
@@ -41,12 +44,21 @@ BEGIN
              , mensaje_error = v_error
              , fecha_fin     = NOW()
         WHERE  id = v_audit_id;
+        DO RELEASE_LOCK('db_general.etl_clientsfi');   -- libera el candado si lo tenia; si no, no hace nada
         RESIGNAL;   -- relanza el error original: Airflow lo ve como fallo
     END;
 
     -- ════════════════════════════════════════════════════
     -- BLOQUE 1 — INSERT nuevos clientes
     -- ════════════════════════════════════════════════════
+
+    -- Candado: una sola ejecucion a la vez de este SP.
+    -- Si otra corrida (o un CALL manual) lo tiene, espera hasta 300 s.
+    -- Se pide ANTES de leer MAX(client_id) para no duplicar llaves.
+    IF COALESCE(GET_LOCK('db_general.etl_clientsfi', 300), 0) <> 1 THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'etl_clientsfi sigue ocupado por otra ejecucion; reintentar';
+    END IF;
 
     SET v_max_client_id = COALESCE((SELECT MAX(client_id) FROM db_general.tbl_raw_clientsfi), 0);
 
@@ -197,6 +209,8 @@ BEGIN
          , estado           = 'OK'
          , fecha_fin        = NOW()
     WHERE  id = v_audit_id;
+
+    DO RELEASE_LOCK('db_general.etl_clientsfi');
 
 END$$
 
