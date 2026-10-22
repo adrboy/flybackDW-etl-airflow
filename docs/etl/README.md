@@ -401,7 +401,7 @@ SELECT RELEASE_LOCK('prueba_candado');       -- 1
 
 | Tema | Estado |
 |---|---|
-| `RESIGNAL` y candado `GET_LOCK` en los SP del CDC | Desplegados el 2026-10-20: fi (v1.2) y fb, bb, vc y ml (v1.1). Comparados contra el repo con `diff`, sin diferencias: fi, bb y vc. fb y ml verificados por palabras clave (`GET_LOCK` y `RESIGNAL` presentes). Archivos en `dags/sql/clients/sp/raw_bronce/etl_clients*_cdc.sql`. El candado hace que una segunda ejecución del mismo SP, incluso un `CALL` manual, espere hasta 300 s a que termine la primera |
+| `RESIGNAL` y candado `GET_LOCK` en los SP del CDC | Desplegados el 2026-10-20: fi (v1.2) y fb, bb, vc y ml (v1.1). Comparados contra el repo con `diff`, sin diferencias: fi, bb y vc. fb y ml verificados por palabras clave (`GET_LOCK` y `RESIGNAL` presentes). Primeras corridas del DAG con los cinco SP: 2026-10-20 18:00 y 2026-10-21 08:00, todas `OK` en `db_general.etl_audit_log` (20 filas, 12 en la 242 y 8 en la 240, sin errores ni `RUNNING` colgados). Los caminos de error del `RESIGNAL` y el vencimiento del candado siguen sin verse en una corrida real. Archivos en `dags/sql/clients/sp/raw_bronce/etl_clients*_cdc.sql`. El candado hace que una segunda ejecución del mismo SP, incluso un `CALL` manual, espere hasta 300 s a que termine la primera |
 | Límite de corridas simultáneas (`max_active_runs`) | `max_active_runs = 1` desde 2026-10-20. Los disparos extra quedan en cola y se ejecutan después. Descartarlos en lugar de encolarlos queda como mejora pendiente |
 | Definiciones de los SP en el repo | CDC: los cinco, en `dags/sql/clients/sp/raw_bronce/`. Borrado: los cinco, en la misma carpeta |
 
