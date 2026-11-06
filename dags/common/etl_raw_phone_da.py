@@ -5,7 +5,9 @@
 #           de los SPs RAW de teléfonos (insertar nuevos,
 #           revivir y marcar deletedAt) con compuerta de seguridad
 # Carpeta : common/
-# Versión : 1.0 — BORRADOR pendiente de pruebas desde Airflow
+# Versión : 1.1 — BORRADOR pendiente de pruebas desde Airflow
+#   v1.0: versión inicial (242: bb, ml · 240: fi, vc)
+#   v1.1: fb habilitado en la 242 (los 5 productos)
 # Nota    : Patrón de etl_raw_da.py, pero los SPs de teléfonos
 #           reciben (p_max_pct, p_forzar) y devuelven una fila
 #           (nuevos, revividos, marcados, vivos_final, segundos).
@@ -37,8 +39,8 @@ _INSTANCIAS = {
       , 'audit_conn'     : ORIGEN_CONN_ID_242
       , 'audit_tabla'    : 'db_general.etl_audit_log'
       , 'procedimientos' : [
-            # 'db_general.sp_raw_phonefb'    # fb: descomentar cuando se decida habilitarlo
-            'db_general.sp_raw_phonebb'
+            'db_general.sp_raw_phonefb'
+          , 'db_general.sp_raw_phonebb'
           , 'db_general.sp_raw_phoneml'
         ]
     },

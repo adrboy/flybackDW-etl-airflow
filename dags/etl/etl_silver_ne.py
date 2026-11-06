@@ -4,11 +4,13 @@
 # Objetivo: Orquestar Silver por fuente
 #           Maneja errores, logs .txt y notificación email
 # Carpeta : etl/
-# Versión : 2.1 — 2026-09-24
+# Versión : 2.2 — 2026-11-06
 #   v2.0: _notificar corregida — ruta_reporte al email
 #   v2.1: reporte en memoria → send_etl_notification(contenido=)
 #         TXT y email completamente independientes
 #         ninguno depende del otro para tener el reporte
+#   v2.2: DAG_ID → dag_clients_quincenal (el DAG se renombró
+#         porque ahora incluye Gold)
 # ═══════════════════════════════════════════════════════
 import sys
 sys.path.insert(0, '/opt/airflow/dags')
@@ -24,7 +26,7 @@ from common.etl_silver_da  import (
 from common.email_notifier import send_etl_notification
 from common.audit_logger   import escribir_log_txt
 
-DAG_ID = 'dag_silver_clients_quincenal'
+DAG_ID = 'dag_clients_quincenal'
 
 
 # ════════════════════════════════════════════════════════

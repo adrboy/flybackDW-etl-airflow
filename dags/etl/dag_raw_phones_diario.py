@@ -1,19 +1,26 @@
 # ═══════════════════════════════════════════════════════
-# dag_raw_phones_mensual.py
+# dag_raw_phones_diario.py
 # Capa    : Negocio / Orquestador (DAG)
-# Objetivo: Ejecutar los SPs RAW de teléfonos
-#           (insertar nuevos, revivir y marcar deletedAt)
+# Objetivo: Mantener al día el RAW de teléfonos de los 5 productos
+#           ejecutando los SPs sp_raw_phone* (insertar nuevos,
+#           revivir y marcar deletedAt con compuerta de seguridad)
 #           Instancias 242 y 240 en PARALELO
-#           Primer lunes de cada mes a las 5:00am
-#           (una hora antes de dag_masterphones)
+#           Todos los días a las 5:00am
 # Carpeta : etl/
-# Versión : 1.0 — BORRADOR pendiente de pruebas
+# Versión : 1.1 — BORRADOR pendiente de pruebas
+#   v1.0: nombre dag_raw_phones_mensual, primer lunes 5am, sin fb
+#   v1.1: renombrado a dag_raw_phones_diario, diario 5am, fb incluido,
+#         correo solo cuando falla (ver etl_raw_phone_ne.py)
 # Nota    : Se crea PAUSADO. Activarlo manualmente en Airflow.
 #           Al activarlo, Airflow puede lanzar de inmediato una
 #           corrida por el intervalo ya vencido (comportamiento
-#           normal de un DAG nuevo con catchup=False).
+#           normal de un DAG nuevo con catchup=False). Es segura:
+#           los SPs son idempotentes y la compuerta protege el borrado.
 #           Reintentos en 0: repetir un BLOQUEADO de la compuerta
 #           no lo resuelve.
+#
+# ── Ejecución manual desde bash Docker ──────────────────
+#   airflow dags trigger dag_raw_phones_diario
 # ═══════════════════════════════════════════════════════
 import sys
 sys.path.insert(0, '/opt/airflow/dags')
@@ -24,7 +31,7 @@ from datetime                 import datetime
 
 from etl.etl_raw_phone_ne     import orquestar
 
-DAG_ID = 'dag_raw_phones_mensual'
+DAG_ID = 'dag_raw_phones_diario'
 
 
 # ════════════════════════════════════════════════════════
@@ -34,9 +41,9 @@ DAG_ID = 'dag_raw_phones_mensual'
 def task_instancia_242():
     """
     Ejecuta SPs RAW de teléfonos de la instancia 242:
+      → db_general.sp_raw_phonefb
       → db_general.sp_raw_phonebb
       → db_general.sp_raw_phoneml
-      (fb: pendiente de habilitar en common/etl_raw_phone_da.py)
     """
     resultado = orquestar('242')
     if not resultado:
@@ -60,13 +67,13 @@ def task_instancia_240():
 
 with DAG(
     dag_id                = DAG_ID
-  , description           = 'RAW teléfonos — primer lunes 5am (242: bb/ml | 240: fi/vc)'
-  , schedule_interval     = '0 5 * * 1#1'   # ← primer lunes de cada mes a las 5:00
+  , description           = 'RAW teléfonos — diario 5am (242: fb/bb/ml | 240: fi/vc)'
+  , schedule_interval     = '0 5 * * *'   # ← todos los días a las 5:00
   , start_date            = datetime(2026, 11, 1)
   , catchup               = False
   , max_active_runs       = 1
   , is_paused_upon_creation = True
-  , tags                  = ['raw', 'phones', 'mensual']
+  , tags                  = ['raw', 'phones', 'diario']
 ) as dag:
 
     # ── Task instancia 242 ───────────────────────────────

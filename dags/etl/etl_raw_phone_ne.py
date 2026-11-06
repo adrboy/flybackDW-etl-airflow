@@ -5,7 +5,10 @@
 #           por instancia. Maneja errores, auditoría en BD,
 #           log .txt y notificación email
 # Carpeta : etl/
-# Versión : 1.0 — BORRADOR pendiente de pruebas desde Airflow
+# Versión : 1.1 — BORRADOR pendiente de pruebas desde Airflow
+#   v1.0: versión inicial (correo en cada corrida)
+#   v1.1: DAG_ID → dag_raw_phones_diario; el correo solo se envía
+#         cuando algún SP falla o es bloqueado (NOTIFICAR_SOLO_ERROR)
 # Nota    : Un SP que falla o que la compuerta bloquea NO frena
 #           a los demás. Si falla el registro de auditoría solo
 #           se avisa en el log: no cambia el resultado del SP.
@@ -25,7 +28,11 @@ from common.etl_raw_phone_da import (
 from common.email_notifier   import send_etl_notification
 from common.audit_logger     import escribir_log_txt
 
-DAG_ID = 'dag_raw_phones_mensual'
+DAG_ID = 'dag_raw_phones_diario'
+
+# True  → el correo solo sale si algún SP falla o es bloqueado
+# False → el correo sale en cada corrida (también cuando todo va bien)
+NOTIFICAR_SOLO_ERROR = True
 
 
 # ════════════════════════════════════════════════════════
@@ -104,15 +111,16 @@ def orquestar(instancia: str) -> bool:
         log_path = None
 
     # ── Notificación email ────────────────────────────────
-    try:
-        send_etl_notification(
-            dag_id    = DAG_ID
-          , status    = estado_general
-          , log_path  = log_path
-          , extra_msg = f"Instancia {instancia} — {len(procedimientos)} SPs de teléfonos procesados"
-        )
-    except Exception as email_err:
-        print(f"[{datetime.now()}] WARNING: No se pudo enviar email: {email_err}")
+    if hay_error or not NOTIFICAR_SOLO_ERROR:
+        try:
+            send_etl_notification(
+                dag_id    = DAG_ID
+              , status    = estado_general
+              , log_path  = log_path
+              , extra_msg = f"Instancia {instancia} — {len(procedimientos)} SPs de teléfonos procesados"
+            )
+        except Exception as email_err:
+            print(f"[{datetime.now()}] WARNING: No se pudo enviar email: {email_err}")
 
     return not hay_error
 
