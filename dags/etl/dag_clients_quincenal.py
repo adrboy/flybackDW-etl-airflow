@@ -231,6 +231,7 @@ with DAG(
   , schedule_interval   = '0 6 1,15 * *'
   , start_date          = datetime(2026, 9, 19)
   , catchup             = False
+  , max_active_runs     = 1
   , tags                = ['clientes', 'quincenal', 'silver', 'gold']
   , params              = {'fuente': None, 'gold': None, 'solo_gold': None}
   , template_searchpath = '/opt/airflow/dags'   # ← para leer el .sql de Gold
