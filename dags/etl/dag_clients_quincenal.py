@@ -6,7 +6,7 @@
 #           1) Silver: INSERT + UPDATE RAW MariaDB → source SQL Server
 #              Días 1 y 15 de cada mes a las 6am, 5 fuentes en PARALELO
 #           2) Gold: al terminar las 5 OK → sp_etl_maestro
-#              detrás de un interruptor APAGADO por defecto
+#              con interruptor (ENCENDIDO por defecto desde el 2026-11-12)
 # Carpeta : etl/
 # Versión : 1.5 — 2026-11-06
 #   v1.0: solo fb
@@ -20,8 +20,8 @@
 #         Solo corre si: (1) las 5 fuentes terminaron OK,
 #                        (2) no se pidió una fuente concreta,
 #                        (3) el interruptor gold está encendido.
-#         Interruptor: GOLD_HABILITADO_POR_DEFECTO = False
-#         → en las corridas programadas Gold se SALTA.
+#         Interruptor: GOLD_HABILITADO_POR_DEFECTO (False hasta el 2026-11-12; hoy True)
+#         → con False, en las corridas programadas Gold se SALTA (hoy: True, corre).
 #   v1.5: renombrado: dag_silver_clients_quincenal → dag_clients_quincenal
 #         (el DAG ya no es solo Silver). Nueva opción solo_gold: ejecuta
 #         únicamente Gold, sin volver a correr Silver.
@@ -30,7 +30,7 @@
 #         etl/backup/dag_silver_clients_quincenal_v1.4.py.bk
 #
 # ── Ejecución manual desde bash Docker ──────────────────
-# Todas las fuentes (Gold según el interruptor, apagado por defecto):
+# Todas las fuentes (Gold según el interruptor, encendido por defecto):
 #   airflow dags trigger dag_clients_quincenal
 #
 # Todas las fuentes y Gold clientes al terminar:
@@ -65,7 +65,7 @@ DAG_ID = 'dag_clients_quincenal'
 # ── Gold clientes ────────────────────────────────────────
 GOLD_CONN_ID                = 'MSSQL244'
 GOLD_SQL                    = 'sql/clients/exec_sp_maestro.sql'
-GOLD_HABILITADO_POR_DEFECTO = False   # ← pasar a True cuando Gold esté validado
+GOLD_HABILITADO_POR_DEFECTO = True    # ← ENCENDIDO el 2026-11-12: Gold corre solo al terminar Silver
 
 
 # ════════════════════════════════════════════════════════
@@ -295,6 +295,7 @@ with DAG(
       , sql                 = GOLD_SQL
       , autocommit          = True
       , retries             = 0
+      , do_xcom_push        = False
       , on_failure_callback = _notificar_fallo_gold
     )
 
