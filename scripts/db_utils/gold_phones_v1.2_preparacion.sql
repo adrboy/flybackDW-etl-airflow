@@ -1,3 +1,424 @@
+BEGIN TRAN;
+
+UPDATE g
+SET g.createAt = b.primera
+FROM gral.factPersonalInfo g
+INNER JOIN (SELECT idcorreo, phone, productid, MIN(createAt) AS primera
+            FROM gral.factPersonalInfo_bk_20261111
+            GROUP BY idcorreo, phone, productid) b
+        ON b.idcorreo  = g.idcorreo
+       AND b.phone     = g.phone
+       AND b.productid = g.productid
+WHERE b.primera < g.createAt;
+
+SELECT @@ROWCOUNT AS filas_actualizadas;
+
+COMMIT;
+
+SELECT COUNT(*) AS con_fecha_original
+FROM gral.factPersonalInfo
+WHERE createAt < '2026-11-11';
+
+
+
+
+
+
+
+
+SELECT 'fb' AS fuente, COUNT(*) AS vivos, SUM(CASE WHEN countrycode IS NULL THEN 1 ELSE 0 END) AS sin_codigo FROM source.clientsfb WHERE deletedAt IS NULL
+UNION ALL SELECT 'bb', COUNT(*), SUM(CASE WHEN countrycode IS NULL THEN 1 ELSE 0 END) FROM source.clientsbb WHERE deletedAt IS NULL
+UNION ALL SELECT 'ml', COUNT(*), SUM(CASE WHEN countrycode IS NULL THEN 1 ELSE 0 END) FROM source.clientsml WHERE deletedAt IS NULL
+UNION ALL SELECT 'fi', COUNT(*), SUM(CASE WHEN countrycode IS NULL THEN 1 ELSE 0 END) FROM source.clientsfi WHERE deletedAt IS NULL
+UNION ALL SELECT 'vc', COUNT(*), SUM(CASE WHEN countrycode IS NULL THEN 1 ELSE 0 END) FROM source.clientsvc WHERE deletedAt IS NULL;
+
+
+SELECT COUNT(*) AS recuperables
+FROM gral.factPersonalInfo g
+WHERE g.createAt >= '2026-11-11'
+  AND EXISTS (SELECT 1 FROM gral.factPersonalInfo_bk_20261111 b
+              WHERE b.idcorreo = g.idcorreo AND b.phone = g.phone
+                AND b.productid = g.productid AND b.createAt < g.createAt);
+
+
+
+SELECT 'factClientes' AS tabla
+     , (SELECT COUNT(*) FROM gral.factClientes) AS ahora
+     , (SELECT COUNT(*) FROM gral.factClientes_pre_dom15) AS antes
+UNION ALL
+SELECT 'factClientesDetalle'
+     , (SELECT COUNT(*) FROM gral.factClientesDetalle)
+     , (SELECT COUNT(*) FROM gral.factClientesDetalle_pre_dom15)
+UNION ALL
+SELECT 'factPersonalInfo vivos'
+     , (SELECT COUNT(*) FROM gral.factPersonalInfo WHERE deleteAt IS NULL)
+     , (SELECT COUNT(*) FROM gral.factPersonalInfo_bk_20261112 WHERE deleteAt IS NULL);
+
+
+
+
+SELECT * INTO gral.factClientes_pre_dom15        FROM gral.factClientes;
+SELECT * INTO gral.factClientesDetalle_pre_dom15 FROM gral.factClientesDetalle;
+
+SELECT (SELECT COUNT(*) FROM gral.factClientes)               AS fc_original
+     , (SELECT COUNT(*) FROM gral.factClientes_pre_dom15)     AS fc_respaldo
+     , (SELECT COUNT(*) FROM gral.factClientesDetalle)               AS fcd_original
+     , (SELECT COUNT(*) FROM gral.factClientesDetalle_pre_dom15)     AS fcd_respaldo;
+
+
+     DROP TABLE source.Phonefb_bk_20261106;
+DROP TABLE source.Phonebb_bk_20261109;
+DROP TABLE source.Phoneml_bk_20261109;
+DROP TABLE source.Phonefi_bk_20261109;
+DROP TABLE source.Phonevc_bk_20261109;
+
+
+-- SQL Server: lo que hizo Gold el domingo
+SELECT fecha_ejecucion, nombre_procedimiento, estado, registros_insertados, registros_actualizados
+FROM dw_etl.dw_etl_audit_log
+WHERE fecha_ejecucion >= '2026-11-15'
+ORDER BY fecha_ejecucion;
+
+
+
+
+
+
+SELECT s.name AS esquema
+     , t.name AS tabla
+     , t.create_date
+     , (SELECT SUM(p.rows) FROM sys.partitions p
+        WHERE p.object_id = t.object_id AND p.index_id IN (0, 1)) AS filas
+FROM sys.tables t
+INNER JOIN sys.schemas s ON s.schema_id = t.schema_id
+WHERE t.name LIKE '%[_]bk[_]%'
+   OR t.name LIKE '%[_]bk20%'
+   OR t.name LIKE '%prueba%'
+   OR t.name LIKE '%test%'
+ORDER BY t.create_date;
+
+
+
+SELECT TOP 3 fecha_ejecucion, estado, registros_insertados, registros_actualizados, descripcion
+FROM dw_etl.dw_etl_audit_log
+WHERE nombre_procedimiento = 'sp_insert_phones_factPersonalInfo'
+ORDER BY 1 DESC;
+
+SELECT TOP 12 fecha_ejecucion, nombre_procedimiento, estado, registros_insertados, registros_actualizados
+FROM dw_etl.dw_etl_audit_log
+WHERE nombre_procedimiento <> 'sp_insert_phones_factPersonalInfo'
+ORDER BY 1 DESC;
+
+
+
+SELECT * INTO gral.factPersonalInfo_bk_20261112 FROM gral.factPersonalInfo;
+
+SELECT (SELECT COUNT(*) FROM gral.factPersonalInfo)             AS original
+     , (SELECT COUNT(*) FROM gral.factPersonalInfo_bk_20261112) AS respaldo;
+
+
+SELECT TOP 8 fecha_ejecucion
+     , nombre_procedimiento
+     , estado
+     , registros_insertados
+     , registros_actualizados
+FROM dw_etl.dw_etl_audit_log
+WHERE nombre_procedimiento <> 'sp_insert_phones_factPersonalInfo'
+ORDER BY 1 DESC;
+
+
+
+SELECT COUNT(*)         AS retirados_hoy
+     , SUM(x.reaparece) AS reaparecen_con_otro_correo
+FROM (
+    SELECT CASE WHEN EXISTS (SELECT 1 FROM gral.factPersonalInfo n
+                             WHERE n.productid = r.productid
+                               AND n.phone     = r.phone
+                               AND n.deleteAt IS NULL
+                               AND n.idcorreo <> r.idcorreo)
+                THEN 1 ELSE 0 END AS reaparece
+    FROM gral.factPersonalInfo r
+    WHERE r.deleteAt >= CAST(SYSDATETIME() AS DATE)
+) x;
+
+
+SELECT TOP 3 fecha_ejecucion, estado, registros_insertados, registros_actualizados, descripcion
+FROM dw_etl.dw_etl_audit_log
+WHERE nombre_procedimiento = 'sp_insert_phones_factPersonalInfo'
+ORDER BY 1 DESC;
+
+
+SELECT COUNT(*)         AS retirados_hoy
+     , SUM(x.reaparece) AS reaparecen_con_otro_correo
+FROM (
+    SELECT CASE WHEN EXISTS (SELECT 1 FROM gral.factPersonalInfo n
+                             WHERE n.productid = r.productid
+                               AND n.phone     = r.phone
+                               AND n.deleteAt IS NULL
+                               AND n.idcorreo <> r.idcorreo)
+                THEN 1 ELSE 0 END AS reaparece
+    FROM gral.factPersonalInfo r
+    WHERE r.deleteAt >= CAST(SYSDATETIME() AS DATE)
+) x;
+
+
+
+SELECT COUNT(*) AS retirados_hoy
+     , SUM(CASE WHEN EXISTS (SELECT 1 FROM gral.factPersonalInfo n
+                             WHERE n.productid = r.productid AND n.phone = r.phone
+                               AND n.deleteAt IS NULL AND n.idcorreo <> r.idcorreo)
+                THEN 1 ELSE 0 END) AS reaparecen_con_otro_correo
+FROM gral.factPersonalInfo r
+WHERE r.deleteAt >= CAST(SYSDATETIME() AS DATE);
+
+
+
+SELECT TOP 15 b.EstatusN AS antes, a.EstatusN AS ahora
+     , b.EstatusL AS etiqueta_antes, a.EstatusL AS etiqueta_ahora
+     , COUNT(*) AS clientes
+FROM gral.factClientesDetalle a
+INNER JOIN gral.factClientesDetalle_bk_20261112 b ON b.clientid = a.clientid
+WHERE a.clientid % 10 = 1
+  AND ISNULL(a.EstatusN, 0) <> ISNULL(b.EstatusN, 0)
+GROUP BY b.EstatusN, a.EstatusN, b.EstatusL, a.EstatusL
+ORDER BY COUNT(*) DESC;
+
+
+
+EXEC dw_etl.sp_insert_phones_factPersonalInfo @simular = 1;
+
+
+
+
+SELECT SUM(CASE WHEN ISNULL(a.country, '')      <> ISNULL(b.country, '')      THEN 1 ELSE 0 END) AS country
+     , SUM(CASE WHEN ISNULL(a.countrycode, '')  <> ISNULL(b.countrycode, '')  THEN 1 ELSE 0 END) AS countrycode
+     , SUM(CASE WHEN ISNULL(a.state, '')        <> ISNULL(b.state, '')        THEN 1 ELSE 0 END) AS state
+     , SUM(CASE WHEN ISNULL(a.city, '')         <> ISNULL(b.city, '')         THEN 1 ELSE 0 END) AS city
+     , SUM(CASE WHEN ISNULL(a.zip, '')          <> ISNULL(b.zip, '')          THEN 1 ELSE 0 END) AS zip
+     , SUM(CASE WHEN ISNULL(a.corp, '')         <> ISNULL(b.corp, '')         THEN 1 ELSE 0 END) AS corp
+     , SUM(CASE WHEN ISNULL(a.corpcode, 0)      <> ISNULL(b.corpcode, 0)      THEN 1 ELSE 0 END) AS corpcode
+     , SUM(CASE WHEN ISNULL(a.EstatusL, '')     <> ISNULL(b.EstatusL, '')     THEN 1 ELSE 0 END) AS EstatusL
+     , SUM(CASE WHEN ISNULL(a.EstatusN, 0)      <> ISNULL(b.EstatusN, 0)      THEN 1 ELSE 0 END) AS EstatusN
+     , SUM(CASE WHEN ISNULL(a.rank, 0)          <> ISNULL(b.rank, 0)          THEN 1 ELSE 0 END) AS rank
+     , SUM(CASE WHEN ISNULL(a.NameCompleted, '') <> ISNULL(b.NameCompleted, '') THEN 1 ELSE 0 END) AS nombre
+     , SUM(CASE WHEN ISNULL(a.idcorreo, 0)      <> ISNULL(b.idcorreo, 0)      THEN 1 ELSE 0 END) AS idcorreo
+     , SUM(CASE WHEN ISNULL(a.deletedAt, '1900-01-01') <> ISNULL(b.deletedAt, '1900-01-01') THEN 1 ELSE 0 END) AS deletedAt
+FROM gral.factClientesDetalle a
+INNER JOIN gral.factClientesDetalle_bk_20261112 b ON b.clientid = a.clientid
+WHERE a.clientid % 10 = 1;
+
+
+
+
+SELECT (SELECT COUNT(*) FROM gral.factClientes)                 AS fc_ahora
+     , (SELECT COUNT(*) FROM gral.factClientes_bk_20261112)     AS fc_antes
+     , (SELECT COUNT(*) FROM gral.factClientesDetalle)               AS fcd_ahora
+     , (SELECT COUNT(*) FROM gral.factClientesDetalle_bk_20261112)   AS fcd_antes;
+
+
+
+
+
+EXEC dw_etl.sp_etl_maestro;
+
+
+
+SELECT * INTO gral.factClientes_bk_20261112        FROM gral.factClientes;
+SELECT * INTO gral.factClientesDetalle_bk_20261112 FROM gral.factClientesDetalle;
+
+SELECT (SELECT COUNT(*) FROM gral.factClientes)               AS fc_original
+     , (SELECT COUNT(*) FROM gral.factClientes_bk_20261112)   AS fc_respaldo
+     , (SELECT COUNT(*) FROM gral.factClientesDetalle)               AS fcd_original
+     , (SELECT COUNT(*) FROM gral.factClientesDetalle_bk_20261112)   AS fcd_respaldo;
+
+
+
+SELECT o.name AS procedimiento
+     , o.modify_date
+     , CASE WHEN m.definition LIKE N'%THROW%' THEN 'relanza errores' ELSE 'no relanza' END AS errores
+FROM sys.objects o
+INNER JOIN sys.sql_modules m ON m.object_id = o.object_id
+WHERE o.schema_id = SCHEMA_ID('dw_etl')
+  AND o.type = 'P'
+  AND o.name LIKE N'sp[_]%'
+ORDER BY o.name;
+
+
+
+SELECT 1 AS productid
+     , SUM(CASE WHEN c.email IS NULL OR TRIM(c.email) = '' OR c.email LIKE '%@noreply.%' THEN 1 ELSE 0 END) AS sin_correo_real
+     , SUM(CASE WHEN c.email IS NULL OR TRIM(c.email) = '' OR c.email LIKE '%@noreply.%' THEN 0 ELSE 1 END) AS esperan_gold_clientes
+FROM source.Phonefb ph
+LEFT JOIN source.clientsfb c ON c.clientid = ph.clientid
+WHERE ph.deletedAt IS NULL AND ph.phone IS NOT NULL AND LTRIM(RTRIM(ph.phone)) <> ''
+  AND NOT EXISTS (SELECT 1 FROM gral.factClientesDetalle fcd WHERE fcd.clientid = ph.clientid * 10 + 1)
+UNION ALL
+SELECT 2
+     , SUM(CASE WHEN c.email IS NULL OR TRIM(c.email) = '' OR c.email LIKE '%@noreply.%' THEN 1 ELSE 0 END)
+     , SUM(CASE WHEN c.email IS NULL OR TRIM(c.email) = '' OR c.email LIKE '%@noreply.%' THEN 0 ELSE 1 END)
+FROM source.Phonebb ph
+LEFT JOIN source.clientsbb c ON c.clientid = ph.clientid
+WHERE ph.deletedAt IS NULL AND ph.phone IS NOT NULL AND LTRIM(RTRIM(ph.phone)) <> ''
+  AND NOT EXISTS (SELECT 1 FROM gral.factClientesDetalle fcd WHERE fcd.clientid = ph.clientid * 10 + 2)
+UNION ALL
+SELECT 3
+     , SUM(CASE WHEN c.email IS NULL OR TRIM(c.email) = '' OR c.email LIKE '%@noreply.%' THEN 1 ELSE 0 END)
+     , SUM(CASE WHEN c.email IS NULL OR TRIM(c.email) = '' OR c.email LIKE '%@noreply.%' THEN 0 ELSE 1 END)
+FROM source.Phonefi ph
+LEFT JOIN source.clientsfi c ON c.clientid = ph.clientid
+WHERE ph.deletedAt IS NULL AND ph.phone IS NOT NULL AND LTRIM(RTRIM(ph.phone)) <> ''
+  AND NOT EXISTS (SELECT 1 FROM gral.factClientesDetalle fcd WHERE fcd.clientid = ph.clientid * 10 + 3)
+UNION ALL
+SELECT 4
+     , SUM(CASE WHEN c.email IS NULL OR TRIM(c.email) = '' OR c.email LIKE '%@noreply.%' THEN 1 ELSE 0 END)
+     , SUM(CASE WHEN c.email IS NULL OR TRIM(c.email) = '' OR c.email LIKE '%@noreply.%' THEN 0 ELSE 1 END)
+FROM source.Phonevc ph
+LEFT JOIN source.clientsvc c ON c.clientid = ph.clientid
+WHERE ph.deletedAt IS NULL AND ph.phone IS NOT NULL AND LTRIM(RTRIM(ph.phone)) <> ''
+  AND NOT EXISTS (SELECT 1 FROM gral.factClientesDetalle fcd WHERE fcd.clientid = ph.clientid * 10 + 4)
+UNION ALL
+SELECT 5
+     , SUM(CASE WHEN c.email IS NULL OR TRIM(c.email) = '' OR c.email LIKE '%@noreply.%' THEN 1 ELSE 0 END)
+     , SUM(CASE WHEN c.email IS NULL OR TRIM(c.email) = '' OR c.email LIKE '%@noreply.%' THEN 0 ELSE 1 END)
+FROM source.Phoneml ph
+LEFT JOIN source.clientsml c ON c.clientid = ph.clientid
+WHERE ph.deletedAt IS NULL AND ph.phone IS NOT NULL AND LTRIM(RTRIM(ph.phone)) <> ''
+  AND NOT EXISTS (SELECT 1 FROM gral.factClientesDetalle fcd WHERE fcd.clientid = ph.clientid * 10 + 5);
+
+
+
+
+
+
+
+
+
+
+
+SELECT TOP 20 fecha_ejecucion
+     , nombre_procedimiento
+     , estado
+     , registros_insertados
+     , registros_actualizados
+     , registros_procesados
+     , descripcion
+FROM dw_etl.dw_etl_audit_log
+WHERE nombre_procedimiento <> 'sp_insert_phones_factPersonalInfo'
+ORDER BY 1 DESC;
+
+
+
+
+SELECT 1 AS productid, COUNT(*) AS telefonos_esperando
+FROM source.Phonefb ph
+WHERE ph.deletedAt IS NULL AND ph.phone IS NOT NULL AND LTRIM(RTRIM(ph.phone)) <> ''
+  AND NOT EXISTS (SELECT 1 FROM gral.factClientesDetalle fcd WHERE fcd.clientid = ph.clientid * 10 + 1)
+UNION ALL
+SELECT 2, COUNT(*)
+FROM source.Phonebb ph
+WHERE ph.deletedAt IS NULL AND ph.phone IS NOT NULL AND LTRIM(RTRIM(ph.phone)) <> ''
+  AND NOT EXISTS (SELECT 1 FROM gral.factClientesDetalle fcd WHERE fcd.clientid = ph.clientid * 10 + 2)
+UNION ALL
+SELECT 3, COUNT(*)
+FROM source.Phonefi ph
+WHERE ph.deletedAt IS NULL AND ph.phone IS NOT NULL AND LTRIM(RTRIM(ph.phone)) <> ''
+  AND NOT EXISTS (SELECT 1 FROM gral.factClientesDetalle fcd WHERE fcd.clientid = ph.clientid * 10 + 3)
+UNION ALL
+SELECT 4, COUNT(*)
+FROM source.Phonevc ph
+WHERE ph.deletedAt IS NULL AND ph.phone IS NOT NULL AND LTRIM(RTRIM(ph.phone)) <> ''
+  AND NOT EXISTS (SELECT 1 FROM gral.factClientesDetalle fcd WHERE fcd.clientid = ph.clientid * 10 + 4)
+UNION ALL
+SELECT 5, COUNT(*)
+FROM source.Phoneml ph
+WHERE ph.deletedAt IS NULL AND ph.phone IS NOT NULL AND LTRIM(RTRIM(ph.phone)) <> ''
+  AND NOT EXISTS (SELECT 1 FROM gral.factClientesDetalle fcd WHERE fcd.clientid = ph.clientid * 10 + 5);
+
+
+
+
+
+EXEC dw_etl.sp_insert_phones_factPersonalInfo @simular = 1;
+
+SELECT TOP 5 fecha_ejecucion, estado, registros_insertados, registros_actualizados, descripcion
+FROM dw_etl.dw_etl_audit_log
+WHERE nombre_procedimiento = 'sp_insert_phones_factPersonalInfo'
+ORDER BY 1 DESC;
+
+
+
+SELECT TOP 1 clientid, phone
+FROM source.Phoneml
+WHERE deletedAt IS NULL
+ORDER BY clientid;
+
+
+/*UPDATE source.Phoneml
+SET deletedAt = NULL
+WHERE clientid = 1 AND phone = '6144880317';*/
+
+
+SELECT id, idcorreo, phone, createAt, updateAt, deleteAt
+FROM gral.factPersonalInfo
+WHERE productid = 5 AND phone = '6144880317';
+
+
+EXEC dw_etl.sp_insert_phones_factPersonalInfo @productid = 5;
+
+
+EXEC dw_etl.sp_insert_phones_factPersonalInfo @productid = 5;
+
+
+
+
+EXEC dw_etl.sp_insert_phones_factPersonalInfo @productid = 5;
+
+
+
+EXEC dw_etl.sp_insert_phones_factPersonalInfo;
+
+
+
+
+EXEC dw_etl.sp_insert_phones_factPersonalInfo @productid = 1;
+
+EXEC dw_etl.sp_insert_phones_factPersonalInfo @productid = 4;
+
+EXEC dw_etl.sp_insert_phones_factPersonalInfo @productid = 3;
+
+SELECT productid
+     , COUNT(*)                                              AS filas
+     , SUM(CASE WHEN deleteAt IS NULL THEN 1 ELSE 0 END)     AS vivas
+FROM gral.factPersonalInfo
+GROUP BY productid
+ORDER BY productid;
+
+
+EXEC dw_etl.sp_insert_phones_factPersonalInfo @productid = 5, @simular = 1;
+
+EXEC dw_etl.sp_insert_phones_factPersonalInfo @productid = 5;
+
+
+SELECT COUNT(*) AS parametros
+FROM sys.parameters
+WHERE object_id = OBJECT_ID(N'dw_etl.sp_insert_phones_factPersonalInfo');
+
+
+SELECT COUNT(*) AS parametros
+FROM sys.parameters
+WHERE object_id = OBJECT_ID(N'dw_etl.sp_insert_phones_factPersonalInfo');
+
+
+SELECT OBJECT_ID(N'dw_etl.sp_insert_phones_factPersonalInfo_bk_20261111') AS existe_copia;
+
+EXEC dw_etl.sp_insert_phones_factPersonalInfo @productid = 5, @simular = 1;
+
+EXEC dw_etl.sp_insert_phones_factPersonalInfo @productid = 5;
+
+ALTER TABLE gral.factPersonalInfo
+    ADD CONSTRAINT UQ_factPersonalInfo_correo_phone_producto
+    UNIQUE (idcorreo, phone, productid);
+
 -- ============================================================
 -- Gold teléfonos v1.2 — PREPARACIÓN: VACIAR Y RECARGAR desde Silver
 -- Base    : DBGeneralDW (SQL Server 244)
@@ -26,8 +447,7 @@ FROM sys.sql_expression_dependencies d
 INNER JOIN sys.objects o ON o.object_id = d.referencing_id
 WHERE d.referenced_schema_name = 'gral'
   AND d.referenced_entity_name = 'factPersonalInfo'
-ORDER BY o.type_desc
-       , objeto;
+ORDER BY o.type_desc, objeto;
 
 -- PASO 0b — llaves foráneas hacia la tabla: debe dar 0 filas
 SELECT OBJECT_NAME(parent_object_id) AS tabla_que_referencia
@@ -126,6 +546,7 @@ SELECT (SELECT COUNT(*) FROM gral.factPersonalInfo)             AS original
 -- Ejecutar el paso 3 y el 4 seguidos.
 -- ------------------------------------------------------------
 DELETE FROM gral.factPersonalInfo;
+truncate table gral.factPersonalInfo;
 
 ALTER TABLE gral.factPersonalInfo
     ADD CONSTRAINT UQ_factPersonalInfo_correo_phone_producto
