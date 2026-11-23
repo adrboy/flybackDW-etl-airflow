@@ -221,7 +221,7 @@ Instancias: 242 = fb, bb, ml · 240 = fi, vc.
 # Parámetros: @productid (NULL = los 5), @max_pct, @forzar, @simular
 # Audita  : dw_etl.dw_etl_audit_log (insertados / revividos / retirados / vivos finales)
 # Nota    : un teléfono corregido = uno retirado + uno nuevo (el número es parte de la llave);
-#           los clientes sin correo real no entran a Gold (6,674 teléfonos hoy)
+#           los clientes sin correo real no entran a Gold (5,435 teléfonos al 2026-11-18)
 # ═══════════════════════════════════════════════════════
 ```
 
@@ -319,7 +319,41 @@ No verificado: `flybackDW_spInsertHistoricoCobranza.py` y `flybackDW_sp_Finaliza
 |---|---|
 | Países | aplicar `fn_pais_id` en los diez `select_silver_*` (hoy comparan por prefijo con `LIMIT 1`); casos sin resolver: `EUROPE`, `EN`, `EL` (45 de fb), 6 ciudades de ml, `UNITED STATES MINOR` (22 de vc) |
 | `ingreso` y `egreso` | siguen en los selects de Silver (fijos en 0); decidido quitarlos |
-| Revivir clientes | el CDC y el UPDATE de Silver no limpian `deletedAt`; en fi hay 1,271 clientes marcados que existen hoy y no están en Silver |
-| Teléfonos sin correo | 6,674 teléfonos de clientes sin correo real no pueden entrar a `factPersonalInfo` (decisión de diseño) |
+| Revivir clientes | el CDC y el UPDATE de Silver no limpian `deletedAt`; en fi hay 1,271 clientes marcados que existen hoy y no están en Silver (marcados en bloque el 2026-09-24; cumplen el criterio del SP de borrado). Decisión 2026-11-18: no se modifica el código; se monitorea (el algoritmo actual cubre a los clientes con correo real, que es lo que llega a Gold). De los 1,271 marcados solo 1 tiene correo real: `client_id` 59905 (anotado). Hoy no entraría a Silver porque el INSERT solo toma ids mayores que el máximo; si se quisiera ver, habría que quitarle el `deletedAt` y revisar `source.clientsfi` y `gral.factClientesDetalle` (clientid 599053). Se probó un cambio (INSERT por etapas con NOT EXISTS) y se descartó; el borrador quedó archivado en `scripts/db_utils/archivo/`. Monitoreo: cada quincena, los clientes con correo real vivos en Silver y ausentes de `factClientesDetalle` deben ser 0 |
+| Teléfonos sin correo | 5,435 teléfonos de clientes sin correo real no pueden entrar a `factPersonalInfo` (decisión de diseño); además 327 teléfonos de fi cuyo cliente no está en Silver: 237 por los clientes marcados (solo 1 de los 1,271 tiene correo real, así que revivirlos no los llevaría a Gold), 87 de clientes que no califican para RAW de clientes y 3 de diferencia de momento |
 | Ciclo de borrar y revivir de RAW a Silver | falta probarlo de punta a punta con teléfonos de fb |
 | Auditoría de conteo RAW → Silver → Gold | siguiente etapa: comparar cantidades por producto en cada capa |
+
+---
+
+## 13. Validación de la primera corrida automática (domingo 2026-11-15)
+
+Leido de los reportes en `logs/` y de `dw_etl.dw_etl_audit_log`. Los interruptores de Gold estaban encendidos.
+
+| Hora | Pieza | Resultado |
+|---|---|---|
+| 5:00 | RAW de teléfonos (242 y 240) | OK |
+| 6:00 | Silver de clientes (5 en paralelo) | `UPDATE` 1,964 · `INSERT` 1,349 |
+| 6:00 | Gold de clientes (`sp_etl_maestro`, 11 s) | `factClientes` +813 / 75 actualizados · detalles insertados 993 + 24 + 281 + 48 + 0 = 1,346 |
+| 7:00 | Silver de teléfonos (cadena fb → bb → ml → fi → vc) | `UPDATE` 62 · `INSERT` 685 |
+| 7:00 | Gold de teléfonos (`sp_insert_phones_factPersonalInfo`) | insertados 1,186 · revividos 0 · retirados 69 · vivos 451,728 |
+| 8:00 y 18:00 | RAW de clientes (242 y 240) | OK |
+
+Comprobaciones contra las líneas base del sábado:
+
+| Tabla | Antes | Después | Diferencia |
+|---|---|---|---|
+| `factClientes` | 293,509 | 294,322 | +813 |
+| `factClientesDetalle` | 510,567 | 511,913 | +1,346 |
+| `factPersonalInfo` vivos | 450,611 | 451,728 | +1,117 |
+
+Lectura:
+
+- Las inserciones de cada detalle de Gold igualan a las de Silver (fb 993, bb 24, fi 281); en vc, 48 de 51:
+  los 3 restantes son clientes sin correo real.
+- Gold de teléfonos insertó más (1,186) que Silver ese día (685): los clientes que llegaron a Gold el domingo
+  ya tenían sus teléfonos en Silver y entraron al mapearse.
+- Los 69 retiros son el 0.015% de los vivos; la compuerta es del 2%.
+- Teléfonos de clientes con correo real que no están en Gold: 0.
+
+Próxima corrida programada: 2026-12-01, 6:00 (clientes) y 7:00 (teléfonos).
